@@ -1,0 +1,6 @@
+ghidra/
+logs/
+backup/claude.json*
+build/
+docs/ghidra/
+extracted/
