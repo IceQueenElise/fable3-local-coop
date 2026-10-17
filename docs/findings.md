@@ -93,6 +93,11 @@ Build 6 adds a binding probe: it logs (caller, event user, requested user, resul
 
 Build 12: a second CGUIInput bound to player 2's CPlayer is registered with the input system while player 2 is in the game.
 
+| R23 | Build 12+: player 2's START opens their own pause menu, Back teleports them to player 1, and the two menus are isolated from each other (user confirmed) | runs 12–16 | Runtime |
+| R24 | **Game modes** (mode manager `[[game+0xC]+0x30]`, `FUN_006e2bb0` → current mode, `vfunc+4` = id): 6 = gameplay, 8 = pause menu, 1 = Sanctuary GUI (`FUN_00bb0ec0`), 4/5 during loading. `DAT_01dca550` is not a menu flag. GUI action ids: `0x0E` START (opens the pause menu), `0x1B`/`0x1C` sticks, `0x1E`–`0x25` D-pad (→ Lua `GUI:SetDirectionToHeld()`), `0x5D`/`0x5E` A/B | runs 14–16 | Runtime |
+| R25 | Left-stick GUI actions → `FUN_00b9b4a0` → `FUN_00b9b240`: store `+0x1C/+0x20` in the CGUIInput and call Lua `GUI:StoreLeftThumbstickValues()` (right stick: `FUN_00b9b380`, `+0x24/+0x28`). **Player 2's sticks still don't navigate their pause menu** after forwarding the action to the main CGUIInput, mirroring its stick fields, or swapping stick events to user 0. Next attempt: swap thumbsticks at the XInput level while player 2 owns the menu | runs 14–17 | Runtime, unresolved |
+| R26 | RB (gamercard) on the player-interaction prompt → `XShowGamerCardUI` at `01135268`/`011352c8`. Under xLiveLess the prompts then stop appearing; skipping the call fixes it. Interact/gift worked only player 2 → player 1 while the action hook dropped player 1's GUI stick actions during "menu" modes (then any non-gameplay mode). After that was removed, both directions work (user confirmed) | runs 16–18 | Runtime |
+
 Build 10: GUI filter patched to pass user 3 too; `CanCouchPlayerEnterGUI` set once player 2 has joined (couch mode).
 
 Build 7 patches `00d89e70` to jump to a stub that sets EBP = 3 for device-3 events (otherwise 0), which fixes both the event user and the group key. Sign-in seeding now also runs when a START with user 3 reaches the detector.

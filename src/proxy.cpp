@@ -2,6 +2,8 @@
 
 #include "proxy.h"
 
+#include "gui.h"
+#include "input.h"
 #include "log.h"
 
 namespace {
@@ -98,6 +100,16 @@ extern "C" DWORD WINAPI Proxy_XInputGetState(DWORD user, XINPUT_STATE* state)
 	DWORD result = real::GetState(pad, state);
 	if (result == ERROR_SUCCESS) {
 		TrackStart(pad, state);
+		// The menus read player 1's thumbsticks; while player 2 has a menu open, the two
+		// pads trade thumbsticks so player 2 can navigate it and player 1 can't.
+		if ((pad == 0 || pad == kExtraPad) && CouchPlayerHasMenu()) {
+			XINPUT_STATE other;
+			const bool otherConnected = real::GetState(pad == 0 ? kExtraPad : 0, &other) == ERROR_SUCCESS;
+			state->Gamepad.sThumbLX = otherConnected ? other.Gamepad.sThumbLX : 0;
+			state->Gamepad.sThumbLY = otherConnected ? other.Gamepad.sThumbLY : 0;
+			state->Gamepad.sThumbRX = otherConnected ? other.Gamepad.sThumbRX : 0;
+			state->Gamepad.sThumbRY = otherConnected ? other.Gamepad.sThumbRY : 0;
+		}
 	}
 	return result;
 }

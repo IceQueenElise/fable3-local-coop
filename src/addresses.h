@@ -127,12 +127,13 @@ constexpr size_t kGuiInputLeftStick = 0x1c;   // float x, y
 constexpr size_t kGuiInputRightStick = 0x24;  // float x, y
 
 // Game modes (CurrentGameMode): 6 gameplay, 8 pause menu, 1 Sanctuary GUI.
+constexpr int kModeSanctuary = 1;
+constexpr int kModePauseMenu = 8;
 
 // Player-interaction prompt (FUN_01133be0): RB calls XShowGamerCardUI (xlive #5252,
 // DWORD WINAPI(DWORD user, ULONGLONG xuid)) through its import thunk.
 constexpr uintptr_t kXShowGamerCardUIThunk = 0x017d1afc;
 constexpr uintptr_t kInteractionGamerCardCalls[] = {0x01135268, 0x011352c8};
-
 // CPlayer (FUN_00bbec20): +0x30 type, +0x34 user index.
 constexpr size_t kPlayerUser = 0x34;
 

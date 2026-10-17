@@ -23,8 +23,8 @@ void* g_couchGuiInput = nullptr;
 void* g_registeredWith = nullptr;
 volatile GuiOwner g_owner = GuiOwner::None;
 bool g_lastOpen = false;
-int g_gameplayMode = -1;  // game mode id when player 2 joined
 int g_lastMode = -2;
+volatile bool g_couchMenu = false;  // player 2 has a menu open; read by the XInput exports
 DWORD g_lastMainButton = 0;   // GetTickCount() of the last button action per GUI input
 DWORD g_lastCouchButton = 0;
 
@@ -78,17 +78,6 @@ int CurrentGameMode()
 	return id(mode, nullptr);
 }
 
-// The menus read thumbstick state from the main CGUIInput (FUN_00b9b240 / FUN_00b9b380 store
-// it in the GUI input itself), so store player 2's stick action there too. The values come
-// from the action, in case player 2's own GUI input gated it before storing.
-void MirrorStick(const int* action, void* to)
-{
-	auto* dst = static_cast<uint8_t*>(to);
-	const bool left = action[0] == addr::kActionLeftStick;
-	dst[left ? addr::kGuiInputLeftMoved : addr::kGuiInputRightMoved] = 1;
-	memcpy(dst + (left ? addr::kGuiInputLeftStick : addr::kGuiInputRightStick), action + 1, 8);
-}
-
 void __fastcall ActionDetour(void* self, void* edx, const int* action)
 {
 	const bool couchInput = self == g_couchGuiInput && self != nullptr;
@@ -102,14 +91,7 @@ void __fastcall ActionDetour(void* self, void* edx, const int* action)
 		(couchInput ? g_lastCouchButton : g_lastMainButton) = GetTickCount();
 		NoteActionId(couchInput, id);
 	}
-	const bool couchMenu = stick && g_owner == GuiOwner::CouchPlayer && IsGuiOpen();
-	if (couchMenu && !couchInput) {
-		return;  // player 1's sticks stay out of player 2's menu
-	}
 	g_originalAction(self, edx, action);
-	if (couchMenu && g_mainGuiInput) {
-		MirrorStick(action, g_mainGuiInput);
-	}
 }
 
 void Register(void* couch)
@@ -149,8 +131,13 @@ void Unregister(const char* why)
 
 bool IsGuiOpen()
 {
-	// Any game mode other than the one player 2 joined in counts as a menu.
-	return g_gameplayMode >= 0 && CurrentGameMode() != g_gameplayMode;
+	const int mode = CurrentGameMode();
+	return mode == addr::kModePauseMenu || mode == addr::kModeSanctuary;
+}
+
+bool CouchPlayerHasMenu()
+{
+	return g_couchMenu;
 }
 
 GuiOwner CurrentGuiOwner()
@@ -180,7 +167,7 @@ void UpdateCouchGuiInput()
 {
 	const int mode = CurrentGameMode();
 	if (mode != g_lastMode) {
-		Log("game mode %d -> %d (gameplay mode %d)", g_lastMode, mode, g_gameplayMode);
+		Log("game mode %d -> %d", g_lastMode, mode);
 		g_lastMode = mode;
 	}
 	const bool open = IsGuiOpen();
@@ -198,6 +185,7 @@ void UpdateCouchGuiInput()
 			!open ? "" : g_owner == GuiOwner::CouchPlayer ? " by player 2" : " by player 1");
 		g_lastOpen = open;
 	}
+	g_couchMenu = open && g_owner == GuiOwner::CouchPlayer;
 
 	void* couch = reinterpret_cast<int(__cdecl*)()>(addr::Rebase(addr::kGetMode))() == 1
 		? PlayerOfType(addr::kCouchPlayer)
@@ -216,9 +204,5 @@ void UpdateCouchGuiInput()
 	}
 	if (couch && !g_registeredWith) {
 		Register(couch);
-		if (g_gameplayMode < 0) {
-			g_gameplayMode = mode;  // player 2 joins during gameplay
-			Log("gameplay mode is %d", g_gameplayMode);
-		}
 	}
 }
