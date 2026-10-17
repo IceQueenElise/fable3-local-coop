@@ -12,3 +12,6 @@
 // enumerator (to the user it was asked about) and the save writer (to the user of the player
 // whose save it is). Call after InstallInputHooks has set the image base.
 bool InstallSaveHooks();
+
+// The user whose save folder the save manager is currently using (0 unless overridden).
+int CurrentSaveUser();

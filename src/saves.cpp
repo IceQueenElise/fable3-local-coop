@@ -106,6 +106,11 @@ bool RedirectCall(uintptr_t siteVa, uintptr_t expectedVa, void* target)
 
 }  // namespace
 
+int CurrentSaveUser()
+{
+	return g_saveUser > 0 ? g_saveUser : 0;
+}
+
 bool InstallSaveHooks()
 {
 	g_signinInfo = reinterpret_cast<SigninInfoFn>(GetProcAddress(GetModuleHandleW(L"xlive.dll"), MAKEINTRESOURCEA(5267)));
