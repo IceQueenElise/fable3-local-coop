@@ -146,6 +146,23 @@ constexpr uintptr_t kEnumerateSavesCalls[] = {0x007518cd, 0x007527e6, 0x00bbfbe0
 // Save writer for a player: __thiscall(mgr, name, int playerType, int, char), RET 0x10.
 constexpr uintptr_t kSaveForPlayer = 0x00751dc0;
 constexpr uintptr_t kSaveForPlayerCalls[] = {0x007532dc, 0x00753ce5};
+// Save manager = [*kSaveRoot + 0xa8] (FUN_00619a90, FUN_0061a2d0); this of FUN_00753010 /
+// FUN_00751dc0. Strings are a pointer to a refcounted rep (+4 length, +0xc refcount):
+// copy-construct FUN_01a012c0, assign FUN_01a01270 (both __thiscall(dst, src*)), destroy
+// FUN_01a01320 (__fastcall(str)).
+constexpr uintptr_t kSaveRoot = 0x01dbd9dc;
+constexpr size_t kSaveRootManager = 0xa8;
+constexpr uintptr_t kStringCopy = 0x01a012c0;
+constexpr uintptr_t kStringAssign = 0x01a01270;
+constexpr uintptr_t kStringDestroy = 0x01a01320;
+// Hero-only save (used for the couch partner by FUN_00752e80):
+// __thiscall(mgr, name, int playerType, int user, int), RET 0x10, and its call sites.
+constexpr uintptr_t kHeroOnlySave = 0x007521f0;
+constexpr uintptr_t kHeroOnlySaveCalls[] = {0x00753301, 0x00752f05, 0x00753d0a};
+constexpr size_t kSaveMgrMainName = 0x00;       // current main save name, e.g. "hero1autosave"
+constexpr size_t kSaveMgrPartnerName = 0x04;    // couch partner save name; partner save needs it set
+constexpr size_t kSaveMgrPartnerUser = 0x168;   // couch partner's user index, -1 if none
+constexpr uintptr_t kPartnerSaveNameGlobal = 0x01dbd070;  // string; used as the main name when FUN_006a8760
 // Add-local-player FUN_00bbfa10: void* __cdecl(int user, int, char, void*, void*); it lists the
 // user's saves and loads the chosen hero. Its five call sites:
 constexpr uintptr_t kAddLocalPlayer = 0x00bbfa10;

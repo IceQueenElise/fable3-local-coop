@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include "addresses.h"
@@ -27,6 +28,100 @@ SaveFn g_originalSave = nullptr;
 AddPlayerFn g_originalAddPlayer = nullptr;
 int g_saveUser = -1;  // game thread only
 
+void* g_saveManager = nullptr;  // seen as this of the save writer
+
+using StringCopyFn = void*(__fastcall*)(void* dst, void* edx, const void* src);  // __thiscall
+using StringDestroyFn = void(__fastcall*)(void* str);
+using HeroOnlySaveFn = bool(__fastcall*)(void* self, void* edx, void* name, int playerType, int user, int a);
+HeroOnlySaveFn g_originalHeroOnlySave = nullptr;
+
+void* SaveManager()
+{
+	void* root = *reinterpret_cast<void**>(addr::Rebase(addr::kSaveRoot));
+	return root ? *reinterpret_cast<void**>(static_cast<uint8_t*>(root) + addr::kSaveRootManager) : nullptr;
+}
+
+void* StringRep(const void* stringObject)
+{
+	return *static_cast<void* const*>(stringObject);
+}
+
+void CopyString(void* dst, const void* src)
+{
+	reinterpret_cast<StringCopyFn>(addr::Rebase(addr::kStringCopy))(dst, nullptr, src);
+}
+
+void AssignString(void* dst, const void* src)
+{
+	reinterpret_cast<StringCopyFn>(addr::Rebase(addr::kStringAssign))(dst, nullptr, src);
+}
+
+void DestroyString(void* str)
+{
+	reinterpret_cast<StringDestroyFn>(addr::Rebase(addr::kStringDestroy))(str);
+}
+
+// Formats a game string for the log. The character offset in the rep isn't confirmed, so
+// look for a printable run of the stored length at the likely offsets.
+void DescribeString(const void* stringObject, char* out, size_t size)
+{
+	const uint8_t* rep = stringObject ? *static_cast<const uint8_t* const*>(stringObject) : nullptr;
+	if (!rep) {
+		strcpy_s(out, size, "<empty>");
+		return;
+	}
+	const int length = *reinterpret_cast<const int*>(rep + 4);
+	auto printableRun = [length](const char* text) {
+		if (length <= 0 || length >= 64 || IsBadReadPtr(text, static_cast<UINT_PTR>(length))) {
+			return false;
+		}
+		for (int i = 0; i < length; ++i) {
+			if (text[i] < 0x20 || text[i] >= 0x7f) {
+				return false;
+			}
+		}
+		return true;
+	};
+	// Inline characters, or a pointer to them, at the likely offsets.
+	static const size_t kOffsets[] = {0x10, 0x14, 0x08, 0x18, 0x00};
+	for (size_t offset : kOffsets) {
+		const char* inlineText = reinterpret_cast<const char*>(rep + offset);
+		if (printableRun(inlineText)) {
+			sprintf_s(out, size, "\"%.*s\"", length, inlineText);
+			return;
+		}
+		const char* pointed = *reinterpret_cast<const char* const*>(rep + offset);
+		if (printableRun(pointed)) {
+			sprintf_s(out, size, "\"%.*s\"", length, pointed);
+			return;
+		}
+	}
+	sprintf_s(out, size, "len %d, rep %p", length, rep);
+}
+
+void LogSaveState(const char* when)
+{
+	if (!LogEnabled()) {
+		return;
+	}
+	char partnerGlobal[96];
+	DescribeString(reinterpret_cast<void*>(addr::Rebase(addr::kPartnerSaveNameGlobal)), partnerGlobal, sizeof(partnerGlobal));
+	auto* mgr = static_cast<const uint8_t*>(SaveManager());
+	if (!mgr) {
+		Log("save state (%s): no save manager; partner-name global %s", when, partnerGlobal);
+		return;
+	}
+	if (g_saveManager && g_saveManager != mgr) {
+		Log("save state: save manager %p differs from the one seen at save time %p", mgr, g_saveManager);
+	}
+	char mainName[96];
+	char partnerName[96];
+	DescribeString(mgr + addr::kSaveMgrMainName, mainName, sizeof(mainName));
+	DescribeString(mgr + addr::kSaveMgrPartnerName, partnerName, sizeof(partnerName));
+	Log("save state (%s): main %s, partner %s, partner user %d, partner-name global %s", when, mainName, partnerName,
+		*reinterpret_cast<const int*>(mgr + addr::kSaveMgrPartnerUser), partnerGlobal);
+}
+
 DWORD WINAPI SaveSigninInfo(DWORD user, DWORD flags, void* info)
 {
 	if (user == 0 && g_saveUser > 0) {
@@ -48,16 +143,57 @@ void __fastcall EnumerateDetour(void* self, void* edx, int user, void* list, uns
 
 // The join lists the joining user's saves, then reads and loads the chosen one by name, all
 // inside the add-player routine; keep the override for all of it.
+//
+// The join also allocates a new save name for the partner but stores it as the main save
+// name, so the host's saves move to a new slot and the couch partner save (FUN_00752e80,
+// which needs the partner name) never runs. Move it to the partner name and give the host
+// their name back.
 void* __cdecl AddPlayerDetour(int user, int a, int b, void* c, void* d)
 {
+	const bool partner = user > 0 && user < XUSER_MAX_COUNT_FABLE;
+	if (!partner) {
+		return g_originalAddPlayer(user, a, b, c, d);
+	}
 	const int previous = g_saveUser;
-	if (user > 0 && user < XUSER_MAX_COUNT_FABLE) {
-		g_saveUser = user;
-		Log("saves: adding local player for user %d (saves from that user's folder)", user);
+	g_saveUser = user;
+	Log("saves: adding local player for user %d (saves from that user's folder)", user);
+	LogSaveState("before join");
+
+	uint8_t* mgr = static_cast<uint8_t*>(SaveManager());
+	void* hostName = nullptr;  // a game string object: one pointer
+	if (mgr) {
+		CopyString(&hostName, mgr + addr::kSaveMgrMainName);
 	}
 	void* hero = g_originalAddPlayer(user, a, b, c, d);
 	g_saveUser = previous;
+
+	if (mgr && StringRep(mgr + addr::kSaveMgrMainName) != StringRep(&hostName)) {
+		AssignString(mgr + addr::kSaveMgrPartnerName, mgr + addr::kSaveMgrMainName);
+		AssignString(mgr + addr::kSaveMgrMainName, &hostName);
+		Log("saves: join put the partner's new save name in the main slot; moved it to the partner name");
+	}
+	if (mgr) {
+		DestroyString(&hostName);
+	}
+	LogSaveState("after join");
 	return hero;
+}
+
+// The couch partner's hero-only save (FUN_00752e80 -> here) gets the partner's user index but
+// builds its path from user 0's XUID; point it at the partner's folder.
+bool __fastcall HeroOnlySaveDetour(void* self, void* edx, void* name, int playerType, int user, int a)
+{
+	char saveName[96];
+	DescribeString(name, saveName, sizeof(saveName));
+	Log("saves: hero-only save of player type %d (user %d) as %s", playerType, user, saveName);
+	const int previous = g_saveUser;
+	if (user > 0 && user < XUSER_MAX_COUNT_FABLE) {
+		g_saveUser = user;
+	}
+	const bool ok = g_originalHeroOnlySave(self, edx, name, playerType, user, a);
+	g_saveUser = previous;
+	Log("saves: hero-only save %s", ok ? "succeeded" : "failed");
+	return ok;
 }
 
 int UserOfPlayerType(int playerType)
@@ -74,6 +210,11 @@ int UserOfPlayerType(int playerType)
 
 void __fastcall SaveDetour(void* self, void* edx, void* name, int playerType, int a, char b)
 {
+	g_saveManager = self;
+	char saveName[96];
+	DescribeString(name, saveName, sizeof(saveName));
+	Log("saves: saving player type %d as %s", playerType, saveName);
+	LogSaveState("at save");
 	const int previous = g_saveUser;
 	g_saveUser = UserOfPlayerType(playerType);
 	if (g_saveUser != 0) {
@@ -121,6 +262,7 @@ bool InstallSaveHooks()
 	g_originalEnumerate = reinterpret_cast<EnumerateFn>(addr::Rebase(addr::kEnumerateSaves));
 	g_originalSave = reinterpret_cast<SaveFn>(addr::Rebase(addr::kSaveForPlayer));
 	g_originalAddPlayer = reinterpret_cast<AddPlayerFn>(addr::Rebase(addr::kAddLocalPlayer));
+	g_originalHeroOnlySave = reinterpret_cast<HeroOnlySaveFn>(addr::Rebase(addr::kHeroOnlySave));
 
 	int patched = 0;
 	int expected = 0;
@@ -138,6 +280,10 @@ bool InstallSaveHooks()
 	}
 	for (uintptr_t site : addr::kAddLocalPlayerCalls) {
 		patched += RedirectCall(site, addr::kAddLocalPlayer, reinterpret_cast<void*>(&AddPlayerDetour));
+		++expected;
+	}
+	for (uintptr_t site : addr::kHeroOnlySaveCalls) {
+		patched += RedirectCall(site, addr::kHeroOnlySave, reinterpret_cast<void*>(&HeroOnlySaveDetour));
 		++expected;
 	}
 	Log("saves: %d of %d call sites patched", patched, expected);
