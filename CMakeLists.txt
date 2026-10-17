@@ -20,6 +20,7 @@ add_library(xinput1_3 SHARED
 	src/input.cpp
 	src/join.cpp
 	src/routing.cpp
+	src/saves.cpp
 	src/xinput1_3.def
 )
 target_compile_definitions(xinput1_3 PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)

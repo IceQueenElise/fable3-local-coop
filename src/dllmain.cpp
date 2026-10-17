@@ -6,6 +6,7 @@
 #include "input.h"
 #include "join.h"
 #include "routing.h"
+#include "saves.h"
 #include "log.h"
 #include "proxy.h"
 
@@ -25,6 +26,7 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID)
 			InstallInputRouting();
 			InstallGuiHooks();
 			InstallFixes();
+			InstallSaveHooks();
 		}
 	}
 	return TRUE;

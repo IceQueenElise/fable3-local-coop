@@ -4,3 +4,4 @@ backup/claude.json*
 build/
 docs/ghidra/
 extracted/
+backup/saves-*/

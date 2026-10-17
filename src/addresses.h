@@ -134,6 +134,23 @@ constexpr int kModePauseMenu = 8;
 // DWORD WINAPI(DWORD user, ULONGLONG xuid)) through its import thunk.
 constexpr uintptr_t kXShowGamerCardUIThunk = 0x017d1afc;
 constexpr uintptr_t kInteractionGamerCardCalls[] = {0x01135268, 0x011352c8};
+// Save manager. Paths: "<Saved Games>\Lionhead Studios\Fable 3\" (FUN_0067c950) + "<XUID>\"
+// (FUN_00747b20), with the XUID always from XUserGetSigninInfo(0, ...). These are every save
+// manager call to XUserGetSigninInfo (import thunk below); the sign-in cache (FUN_00772190,
+// FUN_00771e00) and CPlayer (FUN_00bbec20) calls are left alone.
+constexpr uintptr_t kXUserGetSigninInfoThunk = 0x017d1a90;
+constexpr uintptr_t kSaveSigninInfoCalls[] = {0x00747b71, 0x00747b8c, 0x0074971e, 0x007477d1, 0x0074791d};
+// Save enumerator: __thiscall(mgr, int user, list, unsigned, char), RET 0x10, and its calls.
+constexpr uintptr_t kEnumerateSaves = 0x007515a0;
+constexpr uintptr_t kEnumerateSavesCalls[] = {0x007518cd, 0x007527e6, 0x00bbfbe0, 0x0071e04a, 0x007525bc};
+// Save writer for a player: __thiscall(mgr, name, int playerType, int, char), RET 0x10.
+constexpr uintptr_t kSaveForPlayer = 0x00751dc0;
+constexpr uintptr_t kSaveForPlayerCalls[] = {0x007532dc, 0x00753ce5};
+// Add-local-player FUN_00bbfa10: void* __cdecl(int user, int, char, void*, void*); it lists the
+// user's saves and loads the chosen hero. Its five call sites:
+constexpr uintptr_t kAddLocalPlayer = 0x00bbfa10;
+constexpr uintptr_t kAddLocalPlayerCalls[] = {0x00bc0523, 0x00bc061c, 0x009ef665, 0x006b6b3e, 0x006b6ba4};
+
 // CPlayer (FUN_00bbec20): +0x30 type, +0x34 user index.
 constexpr size_t kPlayerUser = 0x34;
 
