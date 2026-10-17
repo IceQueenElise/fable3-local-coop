@@ -22,9 +22,18 @@ void LogInit(void* module)
 	while (n > 0 && path[n - 1] != L'\\') {
 		--n;
 	}
+	wcscpy_s(path + n, MAX_PATH - n, L"fable3coop.ini");
+	if (GetPrivateProfileIntW(L"Fable3Coop", L"Log", 1, path) == 0) {
+		return;
+	}
 	wcscpy_s(path + n, MAX_PATH - n, L"fable3coop.log");
 	// Shared read so the log can be tailed while the game runs.
 	g_file = _wfsopen(path, L"w", _SH_DENYWR);
+}
+
+bool LogEnabled()
+{
+	return g_file != nullptr;
 }
 
 void Log(const char* fmt, ...)

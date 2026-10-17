@@ -31,7 +31,7 @@ T Field(const void* base, size_t offset)
 void LogDetectorEvent(void* self, void* event)
 {
 	const int type = Field<int>(event, addr::kEventType);
-	if (type != addr::kEventButtonDown) {
+	if (type != addr::kEventButtonDown || !LogEnabled()) {
 		return;
 	}
 	const int button = Field<uint8_t>(event, addr::kEventButton);
