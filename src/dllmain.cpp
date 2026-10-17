@@ -1,6 +1,7 @@
 #include <windows.h>
 
 #include "bindings.h"
+#include "fixes.h"
 #include "gui.h"
 #include "input.h"
 #include "join.h"
@@ -23,6 +24,7 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID)
 			InstallBindingProbe();
 			InstallInputRouting();
 			InstallGuiHooks();
+			InstallFixes();
 		}
 	}
 	return TRUE;

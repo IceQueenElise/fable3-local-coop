@@ -13,6 +13,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(xinput1_3 SHARED
 	src/bindings.cpp
 	src/dllmain.cpp
+	src/fixes.cpp
 	src/gui.cpp
 	src/log.cpp
 	src/proxy.cpp
