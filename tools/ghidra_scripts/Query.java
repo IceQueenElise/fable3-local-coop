@@ -5,7 +5,7 @@
 //   callers:<addr> decompile every function that references addr
 //   ext:<filter>   list external symbols whose library or name contains filter
 //   lua:<name>     resolve a Lua binding (handler pushed just before the name) and decompile it
-//   dis:<addr>[:n] disassemble n instructions from addr
+//   dis:<addr>[:n[:back]] disassemble n instructions from the instruction containing addr (minus back)
 //   scanw:<start>:<end>:<off> list MOV stores to [reg + off] in an address range
 //   sym:<addr>     nearest symbol at or before addr (e.g. the vtable owning a slot) and its references
 //@category Fable3Coop
@@ -196,7 +196,7 @@ public class Query extends GhidraScript {
 	private void scanWrites(String arg) {
 		String[] p = arg.split(":");
 		AddressSet range = new AddressSet(toAddr(p[0]), toAddr(p[1]));
-		String needle = " + 0x" + p[2].toLowerCase() + "],";
+		String needle = " + 0x" + p[2].toLowerCase() + (p.length > 3 ? "]" : "],");
 		for (Instruction ins : currentProgram.getListing().getInstructions(range, true)) {
 			String s = ins.toString();
 			if ((s.startsWith("MOV ") || p.length > 3) && s.toLowerCase().contains(needle)) {
@@ -207,11 +207,19 @@ public class Query extends GhidraScript {
 		}
 	}
 
-	// dis:<addr>[:<count>] — disassemble count instructions starting at addr.
+	// dis:<addr>[:<count>[:<back>]] — disassemble count instructions starting back
+	// instructions before the instruction containing addr.
 	private void dis(String arg) {
 		String[] p = arg.split(":");
 		int n = p.length > 1 ? Integer.parseInt(p[1]) : 40;
-		Instruction ins = getInstructionAt(toAddr(p[0]));
+		int back = p.length > 2 ? Integer.parseInt(p[2]) : 0;
+		Instruction ins = getInstructionContaining(toAddr(p[0]));
+		if (ins == null) {
+			ins = getInstructionBefore(toAddr(p[0]));
+		}
+		for (int i = 0; i < back && ins != null && ins.getPrevious() != null; i++) {
+			ins = ins.getPrevious();
+		}
 		for (int i = 0; i < n && ins != null; i++, ins = ins.getNext()) {
 			StringBuilder sb = new StringBuilder("  " + ins.getAddress() + "  " + ins);
 			for (Reference r : ins.getReferencesFrom()) {

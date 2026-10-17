@@ -72,6 +72,52 @@ constexpr uintptr_t kLeftStickMatches = 0x013588e0;
 constexpr uintptr_t kIngestZeroUser = 0x00d89e70;
 constexpr uint8_t kIngestZeroUserBytes[] = {0x89, 0x69, 0x28, 0x89, 0x4c, 0x24, 0x30};
 
+// Raw-event feeder for input processes (FUN_00b6d020, feeds NUI::CGUIInput): in gameplay it
+// skips pad events (event+0x24 == 1) whose user isn't the main player's.
+//   MOV ECX,[ESI+0x28]; CMP ECX,[EAX+0x34]; JNZ kGuiFilterSkip
+constexpr uintptr_t kGuiFilter = 0x00b6d085;
+constexpr uint8_t kGuiFilterBytes[] = {0x8b, 0x4e, 0x28, 0x3b, 0x48, 0x34, 0x75, 0x1c};
+constexpr uintptr_t kGuiFilterSkip = 0x00b6d0a9;
+
+// "Couch player can enter GUI" flag, checked by the GUI-open path FUN_007d7000 for
+// non-main players: byte at *(*(*(kGuiRoot) + 0x1c) + 0x58) + 0x8d. Lua: SetCanCouchPlayerEnterGUI.
+constexpr uintptr_t kGuiRoot = 0x01dc2558;
+constexpr size_t kGuiRootSession = 0x1c;
+constexpr size_t kSessionCouchFlags = 0x58;
+constexpr size_t kCanCouchPlayerEnterGui = 0x8d;
+
+// Game root and players: players manager = [[*kGameRoot + 0xc] + 0x40] (FUN_00673c50, FUN_00673f80).
+// FUN_006b7310 / FUN_006b7320: CPlayer* __thiscall(players) for player type 1 (main) / 2 (couch).
+constexpr uintptr_t kGameRoot = 0x01dbdd4c;
+constexpr uintptr_t kMainPlayer = 0x006b7310;
+constexpr uintptr_t kCouchPlayer = 0x006b7320;
+
+// NUI::CGUIInput (the detector's this), an input process: +8 is the CPlayer whose controls it
+// takes; its process slot (FUN_00b9ac30) is that player's type. The PC build creates one
+// (FUN_00b9c760) and FUN_006acd70 always binds it to player type 1. Its START action opens the
+// pause menu / Sanctuary; with player type 2 its Back action teleports that hero (FUN_00b9be30).
+constexpr size_t kGuiInputPlayer = 0x08;
+constexpr size_t kGuiInputSize = 0x48;
+constexpr uintptr_t kGuiInputCtor = 0x00b9ab30;       // CGUIInput* __fastcall(void* mem)
+constexpr uintptr_t kGuiInputSetPlayer = 0x00b9abb0;  // void __thiscall(CPlayer*), RET 4
+
+// Game input object (FUN_00b6cad0: void* __cdecl()) and its process list.
+constexpr uintptr_t kGetInput = 0x00b6cad0;
+constexpr uintptr_t kInputAddProcess = 0x00b6d4e0;     // void __thiscall(input, process), RET 4
+constexpr uintptr_t kInputRemoveProcess = 0x00b6d0d0;  // void __thiscall(input, process), RET 4
+
+// bool __cdecl(): game mode is the GUI (pause / Sanctuary) — mode object vfunc+4 == 1.
+// Used by the teleport path FUN_00b9be30. (DAT_01dca550 is not this.)
+constexpr uintptr_t kIsGuiOpen = 0x00bb0ec0;
+
+// CGUIInput action handler (vtable slot 1, FUN_00b9bfd0): void __thiscall(const int* action),
+// RET 4. action[0] is the action id; sticks store action[1..2] into the GUI input.
+constexpr uintptr_t kGuiInputActionSlot = 0x01b1a254 + 0x04;
+constexpr uintptr_t kGuiInputAction = 0x00b9bfd0;
+constexpr int kActionOpenGui = 0x5b;
+constexpr int kActionLeftStick = 0x1b;
+constexpr int kActionRightStick = 0x1c;
+
 // CPlayer (FUN_00bbec20): +0x30 type, +0x34 user index.
 constexpr size_t kPlayerUser = 0x34;
 

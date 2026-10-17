@@ -83,6 +83,18 @@ Build 6 adds a binding probe: it logs (caller, event user, requested user, resul
 | R15 | **Main input update `FUN_00b6dd20`:** ingests manager events (`FUN_00d89de0(mgr+0x2c)`), then for each input process gets its player slot (`vfunc+0x10`) → `FUN_006b6f60(slot)` → `CPlayer+0x34` user → `FUN_00d89480(user)` (per-user control states) | q55, q56 | Static |
 | R16 | **The PC user flattening:** `FUN_00d89de0` does `event+0x28 = 0` for every event (`00d89e70 MOV [ECX+0x28],EBP` with EBP=0) and groups events with key 0 (`00d89e7c MOV [ESP+0x20],EBP`) | q56–q58 | Static |
 
+| R17 | Build 8: each pad drives its own hero (user confirmed). The GUI never receives user-3 events, so pad 2 can't join through the GUI. Fixed by offering the detector a synthetic START event from the hot-plug hook each frame | runs 7–8 | Runtime |
+| R18 | Build 9: pad 2's right stick (event type `0xC`) kept as user 0, so both players turn the shared camera (user confirmed) | run 9 | Runtime |
+| R19 | **The GUI receives events via `FUN_00b6d020`** (detector caller `00b6d09d`), the raw-event feed for input processes whose `vfunc+0x14` is true. In gameplay it skips pad events (`+0x24 == 1`) whose user ≠ the main CPlayer's (`00b6d085`) | run 9 log, q70 | Runtime + static |
+| R20 | GUI-open `FUN_007d7000(playerType, …)` opens only if `IsInLiveGame() \|\| playerType == 1 \|\| CanCouchPlayerEnterGUI`. The flag is the byte at `*(*(*(01dc2558)+0x1c)+0x58)+0x8d`; Lua `SetCanCouchPlayerEnterGUI` handler at `00eb88d0` → `FUN_00c26d90`. Also present: Lua `SetLocalHeroToEnterGUIOf` (`009ee730`), `SetIsGUIOfLocalHeroOverride` (`009edd20`), `IsFullPauseMenuDisabledForHero` (`00ebcae0`) | q63–q69 | Static |
+
+| R21 | Build 11 (handing player 1's GUI input over to player 2) partly worked: the menu opened after two presses, then neither pad could drive it. The GUI state value `[[guiRoot+0x34]+4]` stays 33 throughout, so it isn't an open indicator. **In-GUI flag = byte `DAT_01dca550`** (set/cleared by the GUI update `FUN_008590a0`, read by `FUN_00856b10`) | run 11 log, q82–q84 | Runtime + static |
+| R22 | **GUI input ownership:** `NUI::CGUIInput` (0x48 bytes, ctor `FUN_00b9ab30`) is created once by `FUN_00b9c760` (`guiRoot+0xC`) and registered by `FUN_00b9ae00` → `input->AddProcess` (`FUN_00b6d4e0`). Its player is set by `FUN_00b9abb0`, whose only caller `FUN_006acd70` always passes player type 1. Process slot = `[this+8]+0x30`. Its action handler (slot 1, `FUN_00b9bfd0`): START (action `0x5B`) → `FUN_00b9b900` (opens the GUI). Back → `FUN_00b9be30` → teleport request `FUN_00c3c5f0` (pending byte `+0x77`, done by `FUN_00c33460` with `FX_Henchman_Teleport`), **only when the slot is 2** | q90–q97, q85–q89 | Static |
+
+Build 12: a second CGUIInput bound to player 2's CPlayer is registered with the input system while player 2 is in the game.
+
+Build 10: GUI filter patched to pass user 3 too; `CanCouchPlayerEnterGUI` set once player 2 has joined (couch mode).
+
 Build 7 patches `00d89e70` to jump to a stub that sets EBP = 3 for device-3 events (otherwise 0), which fixes both the event user and the group key. Sign-in seeding now also runs when a START with user 3 reaches the detector.
 
 ## Original working hypothesis for Phase 3

@@ -2,9 +2,12 @@
 
 #include <windows.h>
 
+#include <intrin.h>
+
 #include <cstdint>
 
 #include "addresses.h"
+#include "gui.h"
 #include "input.h"
 #include "log.h"
 #include "proxy.h"
@@ -109,12 +112,30 @@ void SeedSigninCache(DWORD user)
 void* g_detector = nullptr;
 DWORD g_handledStartPress = 0;
 
+// The GUI-open path (FUN_007d7000) refuses non-main players unless this flag is set.
+// Scripts toggle it via SetCanCouchPlayerEnterGUI; the PC build may never set it.
+uint8_t* CouchGuiFlag()
+{
+	void* root = *reinterpret_cast<void**>(addr::Rebase(addr::kGuiRoot));
+	void* session = root ? Field<void*>(root, addr::kGuiRootSession) : nullptr;
+	auto* flags = session ? Field<uint8_t*>(session, addr::kSessionCouchFlags) : nullptr;
+	return flags ? flags + addr::kCanCouchPlayerEnterGui : nullptr;
+}
+
 void __fastcall DetectorDetour(void* self, void* edx, void* event)
 {
 	if (!g_detector) {
-		Log("detector first called, this %p", self);
+		Log("detector first called, this %p, caller %08x", self,
+			static_cast<unsigned>(reinterpret_cast<uintptr_t>(_ReturnAddress()) - addr::g_base + 0x00400000));
 	}
 	g_detector = self;
+	// With the GUI filter patched, the extra pad's START can reach the detector directly,
+	// and the join needs a signed-in cache entry first.
+	if (Field<int>(event, addr::kEventType) == addr::kEventButtonDown &&
+		Field<uint8_t>(event, addr::kEventButton) == addr::kButtonStart &&
+		Field<int>(event, addr::kEventUser) == static_cast<int>(kExtraDeviceId)) {
+		SeedSigninCache(kExtraDeviceId);
+	}
 	LogDetectorEvent(self, event);
 	g_originalDetector(self, edx, event);
 	if (Field<uint8_t>(event, addr::kEventHandled) != 0 && Field<int>(event, addr::kEventType) == addr::kEventButtonDown) {
@@ -129,6 +150,7 @@ void PumpExtraPadJoin()
 	// The GUI only receives the primary user's events, so the extra pad's START never
 	// reaches the detector. Hand it a START press from the extra pad's user instead; the
 	// detector still applies every one of its own checks (in gameplay, not already joined, ...).
+	UpdateCouchGuiInput();
 	const DWORD pressedAt = LastStartPress(kExtraPad);
 	if (pressedAt == 0 || pressedAt == g_handledStartPress) {
 		return;
@@ -144,11 +166,24 @@ void PumpExtraPadJoin()
 	event[addr::kEventButton] = addr::kButtonStart;
 	*reinterpret_cast<int*>(event + addr::kEventUser) = static_cast<int>(kExtraDeviceId);
 
-	Log("pad %lu START: offering join to the game as user %lu", kExtraPad, kExtraDeviceId);
+	uint8_t* couchGui = CouchGuiFlag();
+	// Once player 2 has joined, their own GUI input handles START (see gui.cpp).
+	if (reinterpret_cast<IntFn>(addr::Rebase(addr::kGetMode))() == 1) {
+		return;
+	}
+	Log("pad %lu START: offering join to the game as user %lu (CanCouchPlayerEnterGUI=%d)", kExtraPad, kExtraDeviceId,
+		couchGui ? *couchGui : -1);
 	SeedSigninCache(kExtraDeviceId);
 	LogDetectorEvent(g_detector, event);
 	g_originalDetector(g_detector, nullptr, event);
-	Log("join offer %s", event[addr::kEventHandled] ? "accepted" : "ignored");
+	const bool accepted = event[addr::kEventHandled] != 0;
+	Log("join offer %s", accepted ? "accepted" : "ignored");
+	// The GUI path may have joined player 2 before this offer, so check couch mode too.
+	const bool couch = reinterpret_cast<IntFn>(addr::Rebase(addr::kGetMode))() == 1;
+	if ((accepted || couch) && couchGui && !*couchGui) {
+		*couchGui = 1;
+		Log("set CanCouchPlayerEnterGUI");
+	}
 }
 
 bool InstallJoinProbe()

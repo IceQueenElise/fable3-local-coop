@@ -6,5 +6,6 @@
 // build first overwrites every event's user with 0 so keyboard and mouse (device ids 1, 2)
 // drive player 1. This patch keeps that for devices 0-2 and leaves the extra pad's events
 // (device id kExtraDeviceId) as that user, so the per-user control bindings route them to
-// player 2. Call after InstallInputHooks has set the image base.
+// player 2. A second patch lets the GUI's raw-event feed (FUN_00b6d020) pass that user's
+// pad events as well as the main player's. Call after InstallInputHooks has set the image base.
 bool InstallInputRouting();
