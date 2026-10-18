@@ -242,7 +242,7 @@ public class Query extends GhidraScript {
 			return;
 		}
 		out.println("\n  ==== " + f.getName() + "@" + f.getEntryPoint() + "  [" + why + "]  size=" + f.getBody().getNumAddresses());
-		if (f.getBody().getNumAddresses() > 12000) {
+		if (f.getBody().getNumAddresses() > 40000) {
 			out.println("  (too large, skipped)");
 			return;
 		}

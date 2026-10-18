@@ -19,6 +19,7 @@ add_library(xinput1_3 SHARED
 	src/proxy.cpp
 	src/input.cpp
 	src/join.cpp
+	src/netprobe.cpp
 	src/routing.cpp
 	src/saveio.cpp
 	src/saves.cpp

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <cstdint>
 
@@ -168,8 +168,49 @@ constexpr uintptr_t kPartnerSaveNameGlobal = 0x01dbd070;  // string; used as the
 constexpr uintptr_t kAddLocalPlayer = 0x00bbfa10;
 constexpr uintptr_t kAddLocalPlayerCalls[] = {0x00bc0523, 0x00bc061c, 0x009ef665, 0x006b6b3e, 0x006b6ba4};
 
+// Game packet send: FUN_00686de0 void __thiscall(net manager, packet*, char reliable, int, int).
+// Drops the packet when the net manager has no link (+0x94 == 0). Packet vtable: [0] write,
+// [1] id, [6] read. Receive dispatch: FUN_00690db0 -> FUN_0068a8f0 (ids < 0xee).
+constexpr uintptr_t kPacketSend = 0x00686de0;
+constexpr size_t kNetManagerLink = 0x94;
+// GUI action dispatcher FUN_00d78ba0 (this = [GUI root + 0x48]) calls each callback here as
+// bool __cdecl(const int* action, int player, void* owner), player 1 or 2.
+constexpr uintptr_t kGuiDispatchCall = 0x00d78c98;
+// Script interaction screen NUI::CInteractionModeGUIWorld (vtable 0x01b61cd4, made by the GUI
+// screen manager's mode 3, Lua OpenInteractionMode). Slot 9 is its input handler FUN_0119e8f0,
+// bool __thiscall(screen, const int* action, int player); FUN_0119ddc0 (same signature) checks
+// the press comes from the interacting hero's player. [screen+0x24]+0x30/+0x38 track the
+// interacting entity and the entity it interacts with.
+constexpr uintptr_t kInteractionInputSlot = 0x01b61cf8;
+constexpr uintptr_t kInteractionInput = 0x0119e8f0;
+constexpr uintptr_t kInteractionPlayerCheck = 0x0119ddc0;
+// Script message lookup FUN_007033e0: void* __thiscall(messages, int type, const u32 senderUid[2],
+// int lastId). The Lua binding IsMessageSentBy (FUN_009f7a50) calls it at kIsMessageSentByFindCall.
+// Room scripts accept a button press only if MessageEvents.IsMessageSentBy(self.GUIHeroEntity).
+constexpr uintptr_t kFindMessageBySender = 0x007033e0;
+constexpr uintptr_t kIsMessageSentByFindCall = 0x009f7b33;
+// GUI-level button message types (MESSAGE_EVENT_GUI_LEVEL_*: 101 A, 102 B, 103 X, ...).
+constexpr int kGuiLevelMessageFirst = 101;
+constexpr int kGuiLevelMessageLast = 112;
+// Script message posts on the same object: FUN_009f8ca0 (local) and FUN_009f8ab0 (networked),
+// __thiscall(messages, name, const float* pos, CEntity* entity, CEntity* other, int, int).
+constexpr uintptr_t kPostMessage = 0x009f8ca0;
+constexpr uintptr_t kPostMessageNet = 0x009f8ab0;
+// World prompt icons NUI::CEmotionUI: GUI input callback 00c80680 (prio 5) calls FUN_00c7d430,
+// bool __thiscall(ui, const int* action, int player), at kWorldPromptInputCall. It posts the
+// room's button message (FUN_00c7a310) only for an icon with that action owned by the pressing
+// hero (or by nobody).
+constexpr uintptr_t kWorldPromptInput = 0x00c7d430;
+constexpr uintptr_t kWorldPromptInputCall = 0x00c80692;
+constexpr size_t kWorldPromptIcons = 0x24;   // std::list head; node+8 -> icon: [0] action, [2..3] owner UID
+constexpr int kActionGiftIconAccept = 0xa6;  // Sanctuary gift icons (A / X)
+constexpr int kActionGiftIconReject = 0xa9;
+constexpr int kCouchGuiPlayer = 2;           // player number GUI callbacks get for player 2's input
+
 // CPlayer (FUN_00bbec20): +0x30 type, +0x34 user index.
 constexpr size_t kPlayerUser = 0x34;
+constexpr size_t kPlayerHero = 0x10;   // CTrackingPointer<CEntity>* to the player's hero (FUN_00bbe910)
+constexpr size_t kEntityUid = 0x18;    // CEntity UID, two words
 
 // Sign-in cache: *(*(kNetRoot) + 0x28) is an object whose vector [+0x14, +0x18) holds one
 // 0x20-byte entry per XUser index. FUN_00772190 refreshes only entry 0 on PC.

@@ -5,6 +5,7 @@
 #include "gui.h"
 #include "input.h"
 #include "join.h"
+#include "netprobe.h"
 #include "routing.h"
 #include "saveio.h"
 #include "saves.h"
@@ -29,6 +30,7 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID)
 			InstallFixes();
 			InstallSaveHooks();
 			InstallSaveFileLog();
+			InstallNetProbe();
 		}
 	}
 	return TRUE;
