@@ -143,6 +143,16 @@ constexpr uintptr_t kSaveSigninInfoCalls[] = {0x00747b71, 0x00747b8c, 0x0074971e
 // Save enumerator: __thiscall(mgr, int user, list, unsigned, char), RET 0x10, and its calls.
 constexpr uintptr_t kEnumerateSaves = 0x007515a0;
 constexpr uintptr_t kEnumerateSavesCalls[] = {0x007518cd, 0x007527e6, 0x00bbfbe0, 0x0071e04a, 0x007525bc};
+constexpr size_t kSaveListBegin = 0x08;  // save name list: vector of game strings, newest first
+constexpr size_t kSaveListEnd = 0x0c;
+// Save info read FUN_0074b4b0 (-> FUN_0074ae10): void __thiscall(?, const string* name, int user,
+// SaveInfo*), RET 0xC; the join calls it at kJoinReadSaveInfoCall and loads the first save whose
+// info is usable. Only hero-only saves (no mainsave/entityuid file) are marked usable.
+constexpr uintptr_t kReadSaveInfo = 0x0074b4b0;
+constexpr uintptr_t kJoinReadSaveInfoCall = 0x00bbfc19;
+constexpr size_t kSaveInfoUsable = 0x68;    // bool
+constexpr size_t kSaveInfoType = 0x6c;      // 2 = hero only
+constexpr size_t kSaveInfoHeroOnly = 0x70;  // bool
 // Save writer for a player: __thiscall(mgr, name, int playerType, int, char), RET 0x10.
 constexpr uintptr_t kSaveForPlayer = 0x00751dc0;
 constexpr uintptr_t kSaveForPlayerCalls[] = {0x007532dc, 0x00753ce5};

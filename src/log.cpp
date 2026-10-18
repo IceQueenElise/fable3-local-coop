@@ -11,6 +11,7 @@ namespace {
 
 CRITICAL_SECTION g_lock;
 FILE* g_file = nullptr;
+wchar_t g_configPath[MAX_PATH];
 
 }  // namespace
 
@@ -23,12 +24,18 @@ void LogInit(void* module)
 		--n;
 	}
 	wcscpy_s(path + n, MAX_PATH - n, L"fable3coop.ini");
+	wcscpy_s(g_configPath, path);
 	if (GetPrivateProfileIntW(L"Fable3Coop", L"Log", 1, path) == 0) {
 		return;
 	}
 	wcscpy_s(path + n, MAX_PATH - n, L"fable3coop.log");
 	// Shared read so the log can be tailed while the game runs.
 	g_file = _wfsopen(path, L"w", _SH_DENYWR);
+}
+
+const wchar_t* ConfigPath()
+{
+	return g_configPath;
 }
 
 bool LogEnabled()

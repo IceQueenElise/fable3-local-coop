@@ -34,6 +34,13 @@ using StringCopyFn = void*(__fastcall*)(void* dst, void* edx, const void* src); 
 using StringDestroyFn = void(__fastcall*)(void* str);
 using HeroOnlySaveFn = bool(__fastcall*)(void* self, void* edx, void* name, int playerType, int user, int a);
 HeroOnlySaveFn g_originalHeroOnlySave = nullptr;
+// Save info read FUN_0074b4b0: void __thiscall(?, const string* name, int user, SaveInfo* info).
+using SaveInfoFn = void(__fastcall*)(void* self, void* edx, const void* name, int user, uint8_t* info);
+
+// Partner save choice for the join in progress (fable3coop.ini PartnerSave): empty keeps the
+// game's choice, "new" makes a new hero, otherwise the name of a save in the partner's folder.
+int g_joinUser = -1;
+char g_partnerChoice[64] = "";
 
 void* SaveManager()
 {
@@ -130,6 +137,58 @@ DWORD WINAPI SaveSigninInfo(DWORD user, DWORD flags, void* info)
 	return g_signinInfo(user, flags, info);
 }
 
+const char* SaveNameText(void* const* stringObject)
+{
+	auto* rep = static_cast<const char* const*>(*stringObject);
+	return rep && *rep ? *rep : "";
+}
+
+// Applies the partner save choice to the join's save list (a vector of game strings at
+// list+8..+0xC, newest first). The join loads the first usable save, or makes a new hero when
+// the list is empty, so keep only the chosen save, or nothing for "new".
+void ApplyPartnerChoice(uint8_t* list)
+{
+	auto** begin = *reinterpret_cast<void***>(list + addr::kSaveListBegin);
+	auto** end = *reinterpret_cast<void***>(list + addr::kSaveListEnd);
+	for (auto** it = begin; it != end; ++it) {
+		Log("saves: partner save candidate %s", SaveNameText(it));
+	}
+	if (!g_partnerChoice[0]) {
+		return;
+	}
+	const bool makeNew = _stricmp(g_partnerChoice, "new") == 0;
+	void** keep = nullptr;
+	for (auto** it = begin; !makeNew && it != end; ++it) {
+		char withSuffix[80];
+		sprintf_s(withSuffix, "%sautosave", g_partnerChoice);
+		const char* name = SaveNameText(it);
+		if (_stricmp(name, g_partnerChoice) == 0 || _stricmp(name, withSuffix) == 0) {
+			keep = it;
+			break;
+		}
+	}
+	if (!makeNew && !keep) {
+		Log("saves: PartnerSave \"%s\" not found in the partner's saves; keeping the game's choice", g_partnerChoice);
+		return;
+	}
+	void* kept = keep ? *keep : nullptr;
+	for (auto** it = begin; it != end; ++it) {
+		if (it != keep) {
+			DestroyString(it);
+		}
+	}
+	if (keep) {
+		*begin = kept;
+	}
+	*reinterpret_cast<void***>(list + addr::kSaveListEnd) = begin + (keep ? 1 : 0);
+	if (makeNew) {
+		Log("saves: PartnerSave=new: player 2 joins with a new hero");
+	}
+	else {
+		Log("saves: PartnerSave: player 2 joins with %s", g_partnerChoice);
+	}
+}
+
 void __fastcall EnumerateDetour(void* self, void* edx, int user, void* list, unsigned a, char b)
 {
 	const int previous = g_saveUser;
@@ -139,6 +198,25 @@ void __fastcall EnumerateDetour(void* self, void* edx, int user, void* list, uns
 	}
 	g_originalEnumerate(self, edx, user, list, a, b);
 	g_saveUser = previous;
+	if (user == g_joinUser && list) {
+		ApplyPartnerChoice(static_cast<uint8_t*>(list));
+	}
+}
+
+// The join only accepts hero-only (henchman) saves. When player 2 explicitly picked a full main
+// save, mark it hero-only so its hero is loaded as player 2's henchman.
+void __fastcall JoinSaveInfoDetour(void* self, void* edx, const void* name, int user, uint8_t* info)
+{
+	reinterpret_cast<SaveInfoFn>(addr::Rebase(addr::kReadSaveInfo))(self, edx, name, user, info);
+	Log("saves: join save info for %s: usable %d, type %d, hero-only %d", SaveNameText(static_cast<void* const*>(name)),
+		info[addr::kSaveInfoUsable], *reinterpret_cast<int*>(info + addr::kSaveInfoType), info[addr::kSaveInfoHeroOnly]);
+	const bool explicitChoice = g_partnerChoice[0] && _stricmp(g_partnerChoice, "new") != 0;
+	if (explicitChoice && !info[addr::kSaveInfoUsable]) {
+		info[addr::kSaveInfoUsable] = 1;
+		info[addr::kSaveInfoHeroOnly] = 1;
+		*reinterpret_cast<int*>(info + addr::kSaveInfoType) = 2;
+		Log("saves: %s is a full save; loading only its hero for player 2", g_partnerChoice);
+	}
 }
 
 // The join lists the joining user's saves, then reads and loads the chosen one by name, all
@@ -156,7 +234,11 @@ void* __cdecl AddPlayerDetour(int user, int a, int b, void* c, void* d)
 	}
 	const int previous = g_saveUser;
 	g_saveUser = user;
-	Log("saves: adding local player for user %d (saves from that user's folder)", user);
+	wchar_t choice[64];
+	GetPrivateProfileStringW(L"Fable3Coop", L"PartnerSave", L"", choice, 64, ConfigPath());
+	WideCharToMultiByte(CP_ACP, 0, choice, -1, g_partnerChoice, sizeof(g_partnerChoice), nullptr, nullptr);
+	g_joinUser = user;
+	Log("saves: adding local player for user %d (saves from that user's folder), PartnerSave \"%s\"", user, g_partnerChoice);
 	LogSaveState("before join");
 
 	uint8_t* mgr = static_cast<uint8_t*>(SaveManager());
@@ -166,6 +248,7 @@ void* __cdecl AddPlayerDetour(int user, int a, int b, void* c, void* d)
 	}
 	void* hero = g_originalAddPlayer(user, a, b, c, d);
 	g_saveUser = previous;
+	g_joinUser = -1;
 
 	if (mgr && StringRep(mgr + addr::kSaveMgrMainName) != StringRep(&hostName)) {
 		AssignString(mgr + addr::kSaveMgrPartnerName, mgr + addr::kSaveMgrMainName);
@@ -286,6 +369,8 @@ bool InstallSaveHooks()
 		patched += RedirectCall(site, addr::kHeroOnlySave, reinterpret_cast<void*>(&HeroOnlySaveDetour));
 		++expected;
 	}
+	patched += RedirectCall(addr::kJoinReadSaveInfoCall, addr::kReadSaveInfo, reinterpret_cast<void*>(&JoinSaveInfoDetour));
+	++expected;
 	Log("saves: %d of %d call sites patched", patched, expected);
 	return patched == expected;
 }

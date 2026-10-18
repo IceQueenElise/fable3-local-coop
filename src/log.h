@@ -7,3 +7,6 @@ void Log(const char* fmt, ...);
 
 // False when logging is off; use to skip work done only to build log lines.
 bool LogEnabled();
+
+// Full path of fable3coop.ini next to the DLL (set by LogInit).
+const wchar_t* ConfigPath();
