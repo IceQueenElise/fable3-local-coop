@@ -35,6 +35,7 @@ void NoteCall(const char* name, int slot, DWORD user)
 	}
 }
 
+volatile bool g_pickerPadSwap = false;
 volatile DWORD g_startPressedAt[XUSER_MAX_COUNT];
 bool g_startDown[XUSER_MAX_COUNT];
 
@@ -55,6 +56,14 @@ void TrackStart(DWORD pad, const XINPUT_STATE* state)
 DWORD LastStartPress(DWORD pad)
 {
 	return pad < XUSER_MAX_COUNT ? g_startPressedAt[pad] : 0;
+}
+
+void SetPickerPadSwap(bool on)
+{
+	if (g_pickerPadSwap != on) {
+		Log("picker: %s", on ? "player 2's pad drives player 1's input" : "pads restored");
+	}
+	g_pickerPadSwap = on;
 }
 
 bool real::Load()
@@ -97,6 +106,17 @@ extern "C" DWORD WINAPI Proxy_XInputGetState(DWORD user, XINPUT_STATE* state)
 {
 	NoteCall("XInputGetState", 0, user);
 	DWORD pad = RemapUserIndex(user);
+	if (g_pickerPadSwap && pad == kExtraPad) {
+		XINPUT_STATE physical;
+		if (real::GetState(kExtraPad, &physical) == ERROR_SUCCESS) {
+			TrackStart(kExtraPad, &physical);
+		}
+		ZeroMemory(state, sizeof(*state));
+		return ERROR_SUCCESS;
+	}
+	if (g_pickerPadSwap && pad == 0) {
+		pad = kExtraPad;
+	}
 	DWORD result = real::GetState(pad, state);
 	if (result == ERROR_SUCCESS) {
 		TrackStart(pad, state);

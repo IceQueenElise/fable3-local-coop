@@ -10,7 +10,9 @@
 #include "gui.h"
 #include "input.h"
 #include "log.h"
+#include "picker.h"
 #include "proxy.h"
+#include "saves.h"
 
 namespace {
 
@@ -111,6 +113,13 @@ void SeedSigninCache(DWORD user)
 
 void* g_detector = nullptr;
 DWORD g_handledStartPress = 0;
+bool g_offeringJoin = false;  // our own START offer is being passed to the detector
+
+// fable3coop.ini PartnerPicker (default 1): player 2's START opens the hero picker first.
+bool PickerEnabled()
+{
+	return GetPrivateProfileIntW(L"Fable3Coop", L"PartnerPicker", 1, ConfigPath()) != 0;
+}
 
 // The GUI-open path (FUN_007d7000) refuses non-main players unless this flag is set.
 // Scripts toggle it via SetCanCouchPlayerEnterGUI; the PC build may never set it.
@@ -128,13 +137,24 @@ void __fastcall DetectorDetour(void* self, void* edx, void* event)
 		Log("detector first called, this %p, caller %08x", self,
 			static_cast<unsigned>(reinterpret_cast<uintptr_t>(_ReturnAddress()) - addr::g_base + 0x00400000));
 	}
-	g_detector = self;
+	// The couch GUI input (player 2's, gui.cpp) has its own detector; keep the main player's.
+	const void* detectorPlayer = Field<void*>(self, 0x08);
+	if (detectorPlayer && Field<int>(detectorPlayer, addr::kPlayerUser) != static_cast<int>(kExtraDeviceId)) {
+		g_detector = self;
+	}
 	// With the GUI filter patched, the extra pad's START can reach the detector directly,
 	// and the join needs a signed-in cache entry first.
 	if (Field<int>(event, addr::kEventType) == addr::kEventButtonDown &&
 		Field<uint8_t>(event, addr::kEventButton) == addr::kButtonStart &&
 		Field<int>(event, addr::kEventUser) == static_cast<int>(kExtraDeviceId)) {
 		SeedSigninCache(kExtraDeviceId);
+	}
+	// With the picker on, player 2 joins only through it: drop their own START before joining.
+	if (!g_offeringJoin && Field<int>(event, addr::kEventType) == addr::kEventButtonDown &&
+		Field<uint8_t>(event, addr::kEventButton) == addr::kButtonStart &&
+		Field<int>(event, addr::kEventUser) == static_cast<int>(kExtraDeviceId) &&
+		reinterpret_cast<IntFn>(addr::Rebase(addr::kGetMode))() != 1 && PickerEnabled()) {
+		return;
 	}
 	LogDetectorEvent(self, event);
 	g_originalDetector(self, edx, event);
@@ -143,14 +163,73 @@ void __fastcall DetectorDetour(void* self, void* edx, void* event)
 	}
 }
 
+// Hands the join detector a START press from the extra pad's user; the detector still applies
+// every one of its own checks (in gameplay, not already joined, ...). True once player 2 is in.
+bool OfferJoin()
+{
+	alignas(8) uint8_t event[addr::kEventSize] = {};
+	*reinterpret_cast<int*>(event + addr::kEventType) = addr::kEventButtonDown;
+	event[addr::kEventButton] = addr::kButtonStart;
+	*reinterpret_cast<int*>(event + addr::kEventUser) = static_cast<int>(kExtraDeviceId);
+
+	uint8_t* couchGui = CouchGuiFlag();
+	Log("pad %lu START: offering join to the game as user %lu (CanCouchPlayerEnterGUI=%d)", kExtraPad, kExtraDeviceId,
+		couchGui ? *couchGui : -1);
+	SeedSigninCache(kExtraDeviceId);
+	LogDetectorEvent(g_detector, event);
+	g_offeringJoin = true;
+	g_originalDetector(g_detector, nullptr, event);
+	g_offeringJoin = false;
+	const bool accepted = event[addr::kEventHandled] != 0;
+	Log("join offer %s", accepted ? "accepted" : "ignored");
+	// The GUI path may have joined player 2 before this offer, so check couch mode too.
+	const bool couch = reinterpret_cast<IntFn>(addr::Rebase(addr::kGetMode))() == 1;
+	if ((accepted || couch) && couchGui && !*couchGui) {
+		*couchGui = 1;
+		Log("set CanCouchPlayerEnterGUI");
+	}
+	return accepted || couch;
+}
+
+DWORD g_joinAfterPickerUntil = 0;  // retry the join until this tick after a picker choice
+
 }  // namespace
 
 void PumpExtraPadJoin()
 {
 	// The GUI only receives the primary user's events, so the extra pad's START never
-	// reaches the detector. Hand it a START press from the extra pad's user instead; the
-	// detector still applies every one of its own checks (in gameplay, not already joined, ...).
+	// reaches the detector; offer the join from here (after the hero picker, when enabled).
 	UpdateCouchGuiInput();
+	switch (PollPartnerPicker()) {
+	case PickerState::Chosen:
+		SetPartnerChoiceOverride(PickedPartnerSave());
+		g_joinAfterPickerUntil = GetTickCount() + 3000;
+		g_handledStartPress = LastStartPress(kExtraPad);
+		break;
+	case PickerState::Cancelled:
+		g_handledStartPress = LastStartPress(kExtraPad);  // the press that closed the menu
+		return;
+	case PickerState::Open:
+		return;
+	default:
+		break;
+	}
+	// The menu may still be closing on the frame of the choice; keep offering the join briefly.
+	if (g_joinAfterPickerUntil) {
+		const bool couch = reinterpret_cast<IntFn>(addr::Rebase(addr::kGetMode))() == 1;
+		if (couch || static_cast<int>(GetTickCount() - g_joinAfterPickerUntil) > 0) {
+			if (!couch) {
+				Log("picker: join after the choice did not happen");
+			}
+			g_joinAfterPickerUntil = 0;
+			SetPartnerChoiceOverride(nullptr);
+		}
+		else if (g_detector && !IsGuiOpen() && reinterpret_cast<BoolThisFn>(addr::Rebase(addr::kDetectorGate))(g_detector, nullptr)
+			&& OfferJoin()) {
+			g_joinAfterPickerUntil = 0;
+		}
+		return;
+	}
 	const DWORD pressedAt = LastStartPress(kExtraPad);
 	if (pressedAt == 0 || pressedAt == g_handledStartPress) {
 		return;
@@ -160,29 +239,23 @@ void PumpExtraPadJoin()
 		Log("pad %lu START ignored: join detector not seen yet (press any button on pad 0 once)", kExtraPad);
 		return;
 	}
-
-	alignas(8) uint8_t event[addr::kEventSize] = {};
-	*reinterpret_cast<int*>(event + addr::kEventType) = addr::kEventButtonDown;
-	event[addr::kEventButton] = addr::kButtonStart;
-	*reinterpret_cast<int*>(event + addr::kEventUser) = static_cast<int>(kExtraDeviceId);
-
-	uint8_t* couchGui = CouchGuiFlag();
 	// Once player 2 has joined, their own GUI input handles START (see gui.cpp).
 	if (reinterpret_cast<IntFn>(addr::Rebase(addr::kGetMode))() == 1) {
 		return;
 	}
-	Log("pad %lu START: offering join to the game as user %lu (CanCouchPlayerEnterGUI=%d)", kExtraPad, kExtraDeviceId,
-		couchGui ? *couchGui : -1);
-	SeedSigninCache(kExtraDeviceId);
-	LogDetectorEvent(g_detector, event);
-	g_originalDetector(g_detector, nullptr, event);
-	const bool accepted = event[addr::kEventHandled] != 0;
-	Log("join offer %s", accepted ? "accepted" : "ignored");
-	// The GUI path may have joined player 2 before this offer, so check couch mode too.
-	const bool couch = reinterpret_cast<IntFn>(addr::Rebase(addr::kGetMode))() == 1;
-	if ((accepted || couch) && couchGui && !*couchGui) {
-		*couchGui = 1;
-		Log("set CanCouchPlayerEnterGUI");
+	if (PickerEnabled()) {
+		// Same gate the detector uses (in gameplay with a main player), and no menu up.
+		if (!reinterpret_cast<BoolThisFn>(addr::Rebase(addr::kDetectorGate))(g_detector, nullptr) || IsGuiOpen()) {
+			Log("pad %lu START: not in gameplay; picker not opened", kExtraPad);
+			return;
+		}
+		if (OpenPartnerPicker()) {
+			return;
+		}
+		Log("picker: falling back to a direct join");
+	}
+	if (!OfferJoin()) {
+		SetPartnerChoiceOverride(nullptr);
 	}
 }
 

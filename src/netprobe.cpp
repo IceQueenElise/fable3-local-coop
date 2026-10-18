@@ -203,6 +203,55 @@ bool HookPost(int which, uintptr_t va, void* stub)
 	return true;
 }
 
+uintptr_t g_screenLoadResume = 0;
+
+// Logs GUI screen loads (FUN_00d30040, by screen id) with their callers, to identify which UI
+// a menu uses.
+void __cdecl NoteScreenLoad(uintptr_t ret, int id)
+{
+	Log("GUI screen load: id %d from %08x", id, static_cast<unsigned>(ret - addr::g_base + 0x00400000));
+}
+
+// Replaces "PUSH EBX; PUSH ESI; PUSH EDI; MOV EDI,[ESP+0x10]" at the loader's entry.
+__declspec(naked) void ScreenLoadStub()
+{
+	__asm {
+		pushad
+		push dword ptr [esp + 0x24]
+		push dword ptr [esp + 0x24]
+		call NoteScreenLoad
+		add esp, 8
+		popad
+		push ebx
+		push esi
+		push edi
+		mov edi, dword ptr [esp + 0x10]
+		jmp dword ptr [g_screenLoadResume]
+	}
+}
+
+bool HookScreenLoad()
+{
+	auto* site = reinterpret_cast<uint8_t*>(addr::Rebase(addr::kScreenLoad));
+	static const uint8_t kExpected[] = {0x53, 0x56, 0x57, 0x8b, 0x7c, 0x24, 0x10};
+	if (memcmp(site, kExpected, sizeof(kExpected)) != 0) {
+		Log("GUI screen probe: unexpected bytes at the screen loader");
+		return false;
+	}
+	g_screenLoadResume = reinterpret_cast<uintptr_t>(site) + sizeof(kExpected);
+	uint8_t patch[sizeof(kExpected)] = {0xe9, 0, 0, 0, 0, 0x90, 0x90};
+	const int32_t rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&ScreenLoadStub) - (reinterpret_cast<uintptr_t>(site) + 5));
+	memcpy(patch + 1, &rel, sizeof(rel));
+	DWORD oldProtect;
+	if (!VirtualProtect(site, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtect)) {
+		return false;
+	}
+	memcpy(site, patch, sizeof(patch));
+	VirtualProtect(site, sizeof(patch), oldProtect, &oldProtect);
+	FlushInstructionCache(GetCurrentProcess(), site, sizeof(patch));
+	return true;
+}
+
 }  // namespace
 
 bool InstallNetProbe()
@@ -232,5 +281,6 @@ bool InstallNetProbe()
 	const bool posts = HookPost(0, addr::kPostMessage, reinterpret_cast<void*>(&PostStub0))
 		&& HookPost(1, addr::kPostMessageNet, reinterpret_cast<void*>(&PostStub1));
 	Log("message post probe %s", posts ? "installed" : "not installed");
+	Log("GUI screen probe %s", HookScreenLoad() ? "installed" : "not installed");
 	return true;
 }

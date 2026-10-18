@@ -83,6 +83,55 @@ constexpr uintptr_t kGuiFilterSkip = 0x00b6d0a9;
 // non-main players: byte at *(*(*(kGuiRoot) + 0x1c) + 0x58) + 0x8d. Lua: SetCanCouchPlayerEnterGUI.
 constexpr uintptr_t kGuiRoot = 0x01dc2558;
 constexpr size_t kGuiRootSession = 0x1c;
+// Menu box (Lua DisplayMenuBox, FUN_00ebaef0) = [[*kGuiRoot + 0x18] + 0x38]. Begin with a title,
+// add up to 6 entries, show; selecting or cancelling closes it and posts the choice.
+constexpr size_t kGuiRootMenuHolder = 0x18;
+constexpr size_t kMenuHolderMenuBox = 0x38;
+constexpr uintptr_t kMenuBoxBegin = 0x00d7eb00;  // void __thiscall(menu, const string* title)
+constexpr uintptr_t kMenuBoxAdd = 0x00d7f7a0;    // void __thiscall(menu, const string* text)
+constexpr uintptr_t kMenuBoxShow = 0x00d7f1c0;   // bool __thiscall(menu)
+constexpr size_t kMenuBoxMaxEntries = 6;
+constexpr size_t kMenuBoxIndex = 0x00;       // int, highlighted entry
+constexpr size_t kMenuBoxOpen = 0x0c;        // bool
+constexpr size_t kMenuBoxCancelled = 0x0d;   // bool, set when closed by cancel
+constexpr size_t kMenuBoxCancelable = 0x0e;  // bool
+constexpr size_t kMenuBoxScreen = 0x08;       // GUI screen while shown
+constexpr size_t kMenuBoxEntriesBegin = 0x1c;
+constexpr size_t kMenuBoxEntriesEnd = 0x20;
+constexpr size_t kMenuHolderBoxList = 0x34;     // display box list (NUI::CBoxListBase) beside the menu box
+constexpr size_t kDisplayBoxesCurrent = 0x20;   // list: current box
+// bool __thiscall(box list): a display box is up; the menu box show then refuses and clears.
+constexpr uintptr_t kDisplayBoxBusy = 0x00bbd3f0;
+constexpr size_t kGuiRootScreens = 0x34;        // GUI screen table: screen n at +8 + 4n (FUN_00d2f660)
+constexpr size_t kScreensFirst = 0x08;
+constexpr int kMenuBoxScreenId = 5;  // MenuBox.bgf: not shipped on PC, so the menu box never shows
+// GUI screen loader FUN_00d30040: void __thiscall(screens, int id); ids map to .bgf files
+// (0 MessageBoxMulti, 4 DisplayBox, 5 MenuBox, 7 QueryBox, 0x10 BedMenuBox, 0x11 Options, ...).
+constexpr uintptr_t kScreenLoad = 0x00d30040;
+// Game string from text: string* __thiscall(string*, const char* text, int length or -1).
+constexpr uintptr_t kStringFromText = 0x01a01cc0;
+// Wide game string from text: wstring* __thiscall(wstring*, const wchar_t* text, int length or -1).
+constexpr uintptr_t kWideStringAssign = 0x01a00310;
+// Text database: tag -> key (FNV) FUN_0071f870 uint* __thiscall(uint* key, const string* tag);
+// lookup FUN_00720310 wstring* __thiscall(db, wstring* out, const uint* key), RET 8.
+constexpr uintptr_t kTextTagHash = 0x0071f870;
+constexpr uintptr_t kTextLookup = 0x00720310;
+// Options menu (NUI::COptionsMenuBox, display box type 0xF on Options.bgf, GUI screen 0x11).
+// Opened by FUN_00bbd860 void __thiscall(box list, CEntity* owner, char inGame), RET 8, on
+// the box list [[*kGuiRoot + 0x18] + 0x34] (Lua OpenOptionsScreen). Its input handler calls the
+// selection FUN_00beefe0 void __thiscall(box, int player) at kOptionsSelectCall; on the main page
+// ([box+0xC8] 1 or 4) entry [box+0xCC] 1..6 runs Save Management, Game Settings, New Game, Live
+// Guide, Marketplace, Exit. Box vtable slot 2 closes it.
+constexpr uintptr_t kOpenOptionsMenu = 0x00bbd860;
+constexpr size_t kGuiRootMenuLock = 0x120;  // int; the opener does nothing while > 0
+constexpr uintptr_t kOptionsSelect = 0x00beefe0;
+constexpr uintptr_t kOptionsSelectCall = 0x00bf0d8b;
+constexpr uintptr_t kOptionsMenuVtable = 0x01b1e494;
+constexpr size_t kBoxCloseSlot = 2;
+constexpr size_t kOptionsPage = 0xc8;
+constexpr size_t kOptionsEntry = 0xcc;
+constexpr int kOptionsMainPage = 1;
+constexpr int kOptionsMainPageAlt = 4;
 constexpr size_t kSessionCouchFlags = 0x58;
 constexpr size_t kCanCouchPlayerEnterGui = 0x8d;
 

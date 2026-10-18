@@ -41,6 +41,7 @@ using SaveInfoFn = void(__fastcall*)(void* self, void* edx, const void* name, in
 // game's choice, "new" makes a new hero, otherwise the name of a save in the partner's folder.
 int g_joinUser = -1;
 char g_partnerChoice[64] = "";
+char g_partnerOverride[64] = "";  // from the join picker; used for the next join only
 
 void* SaveManager()
 {
@@ -234,9 +235,15 @@ void* __cdecl AddPlayerDetour(int user, int a, int b, void* c, void* d)
 	}
 	const int previous = g_saveUser;
 	g_saveUser = user;
-	wchar_t choice[64];
-	GetPrivateProfileStringW(L"Fable3Coop", L"PartnerSave", L"", choice, 64, ConfigPath());
-	WideCharToMultiByte(CP_ACP, 0, choice, -1, g_partnerChoice, sizeof(g_partnerChoice), nullptr, nullptr);
+	if (g_partnerOverride[0]) {
+		strcpy_s(g_partnerChoice, g_partnerOverride);
+		g_partnerOverride[0] = '\0';
+	}
+	else {
+		wchar_t choice[64];
+		GetPrivateProfileStringW(L"Fable3Coop", L"PartnerSave", L"", choice, 64, ConfigPath());
+		WideCharToMultiByte(CP_ACP, 0, choice, -1, g_partnerChoice, sizeof(g_partnerChoice), nullptr, nullptr);
+	}
 	g_joinUser = user;
 	Log("saves: adding local player for user %d (saves from that user's folder), PartnerSave \"%s\"", user, g_partnerChoice);
 	LogSaveState("before join");
@@ -333,6 +340,11 @@ bool RedirectCall(uintptr_t siteVa, uintptr_t expectedVa, void* target)
 int CurrentSaveUser()
 {
 	return g_saveUser > 0 ? g_saveUser : 0;
+}
+
+void SetPartnerChoiceOverride(const char* choice)
+{
+	strcpy_s(g_partnerOverride, choice ? choice : "");
 }
 
 bool InstallSaveHooks()

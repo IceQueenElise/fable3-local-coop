@@ -15,3 +15,7 @@ bool InstallSaveHooks();
 
 // The user whose save folder the save manager is currently using (0 unless overridden).
 int CurrentSaveUser();
+
+// The save player 2's next join should use (a save name, or "new"), overriding the
+// PartnerSave setting for that one join. Pass nullptr to clear.
+void SetPartnerChoiceOverride(const char* choice);

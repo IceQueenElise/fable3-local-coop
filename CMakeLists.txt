@@ -20,6 +20,7 @@ add_library(xinput1_3 SHARED
 	src/input.cpp
 	src/join.cpp
 	src/netprobe.cpp
+	src/picker.cpp
 	src/routing.cpp
 	src/saveio.cpp
 	src/saves.cpp
@@ -27,6 +28,7 @@ add_library(xinput1_3 SHARED
 )
 target_compile_definitions(xinput1_3 PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 target_compile_options(xinput1_3 PRIVATE /W4 /permissive-)
+target_link_libraries(xinput1_3 PRIVATE shell32 ole32)
 
 set(FABLE3_DIR "F:/Fit Games/Fable 3" CACHE PATH "Fable III install folder for the deploy target")
 add_custom_target(deploy
