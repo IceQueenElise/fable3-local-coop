@@ -1,10 +1,12 @@
 #include "saves.h"
 
 #include <windows.h>
+#include <shlobj.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "addresses.h"
 #include "log.h"
@@ -23,6 +25,15 @@ using GetPlayerFn = void*(__fastcall*)(void* players, void* edx);
 using AddPlayerFn = void*(__cdecl*)(int user, int a, int b, void* c, void* d);
 
 SigninInfoFn g_signinInfo = nullptr;
+
+struct XUserSigninInfoLite {  // XUSER_SIGNIN_INFO
+	uint64_t xuid;
+	DWORD infoFlags;
+	DWORD state;
+	DWORD guestNumber;
+	DWORD sponsorUserIndex;
+	char userName[16];
+};
 EnumerateFn g_originalEnumerate = nullptr;
 SaveFn g_originalSave = nullptr;
 AddPlayerFn g_originalAddPlayer = nullptr;
@@ -42,6 +53,15 @@ using SaveInfoFn = void(__fastcall*)(void* self, void* edx, const void* name, in
 int g_joinUser = -1;
 char g_partnerChoice[64] = "";
 char g_partnerOverride[64] = "";  // from the join picker; used for the next join only
+
+// fable3coop.ini SharedSaveFolder (default 1): player 2's heroes live in player 1's save folder
+// (user 0) and are stamped with player 1's XUID, so one folder holds every hero. With 0, each
+// player's saves go to their own profile's folder.
+bool SharedSaveFolder()
+{
+	static const bool shared = GetPrivateProfileIntW(L"Fable3Coop", L"SharedSaveFolder", 1, ConfigPath()) != 0;
+	return shared;
+}
 
 void* SaveManager()
 {
@@ -132,7 +152,7 @@ void LogSaveState(const char* when)
 
 DWORD WINAPI SaveSigninInfo(DWORD user, DWORD flags, void* info)
 {
-	if (user == 0 && g_saveUser > 0) {
+	if (user == 0 && g_saveUser > 0 && !SharedSaveFolder()) {
 		user = static_cast<DWORD>(g_saveUser);
 	}
 	return g_signinInfo(user, flags, info);
@@ -190,6 +210,62 @@ void ApplyPartnerChoice(uint8_t* list)
 	}
 }
 
+// Player 1's save folder, or "" (the game builds it the same way from user 0's XUID).
+std::wstring MainSaveFolder()
+{
+	XUserSigninInfoLite info = {};
+	if (!g_signinInfo || g_signinInfo(0, 2, &info) != ERROR_SUCCESS || info.xuid == 0) {
+		return {};
+	}
+	PWSTR savedGames = nullptr;
+	if (FAILED(SHGetKnownFolderPath(FOLDERID_SavedGames, 0, nullptr, &savedGames))) {
+		return {};
+	}
+	wchar_t folder[MAX_PATH];
+	swprintf_s(folder, L"%s\\Lionhead Studios\\Fable 3\\%llX\\", savedGames, static_cast<unsigned long long>(info.xuid));
+	CoTaskMemFree(savedGames);
+	return folder;
+}
+
+// With player 2's heroes in player 1's folder, player 1's sorted save lists (Continue, Load,
+// the save room) would offer them too: hide the hero-only (henchman) slots, which can't be
+// loaded as a main game, and put the last save player 1 made first so Continue picks it rather
+// than player 2's save written in the same second. The unsorted listing (new save names) is left
+// alone so numbers are never reused.
+void TidyMainPlayerList(uint8_t* list)
+{
+	const std::wstring folder = MainSaveFolder();
+	auto** begin = *reinterpret_cast<void***>(list + addr::kSaveListBegin);
+	auto** end = *reinterpret_cast<void***>(list + addr::kSaveListEnd);
+	char last[64];
+	wchar_t lastWide[64];
+	GetPrivateProfileStringW(L"State", L"LastMainSave", L"", lastWide, 64, ConfigPath());
+	WideCharToMultiByte(CP_ACP, 0, lastWide, -1, last, sizeof(last), nullptr, nullptr);
+	auto** out = begin;
+	for (auto** it = begin; it != end; ++it) {
+		const char* name = SaveNameText(it);
+		wchar_t mainSave[MAX_PATH];
+		swprintf_s(mainSave, L"%s%hs_mainsave.bin", folder.c_str(), name);
+		if (!folder.empty() && GetFileAttributesW(mainSave) == INVALID_FILE_ATTRIBUTES) {
+			Log("saves: hiding henchman save %s from player 1's list", name);
+			DestroyString(it);
+			continue;
+		}
+		*out++ = *it;
+	}
+	*reinterpret_cast<void***>(list + addr::kSaveListEnd) = out;
+	for (auto** it = begin; last[0] && it != out; ++it) {
+		if (_stricmp(SaveNameText(it), last) == 0) {
+			void* found = *it;
+			for (auto** shift = it; shift != begin; --shift) {
+				*shift = *(shift - 1);
+			}
+			*begin = found;
+			break;
+		}
+	}
+}
+
 void __fastcall EnumerateDetour(void* self, void* edx, int user, void* list, unsigned a, char b)
 {
 	const int previous = g_saveUser;
@@ -201,6 +277,9 @@ void __fastcall EnumerateDetour(void* self, void* edx, int user, void* list, uns
 	g_saveUser = previous;
 	if (user == g_joinUser && list) {
 		ApplyPartnerChoice(static_cast<uint8_t*>(list));
+	}
+	else if (user == 0 && b && list && SharedSaveFolder()) {
+		TidyMainPlayerList(static_cast<uint8_t*>(list));
 	}
 }
 
@@ -303,6 +382,15 @@ void __fastcall SaveDetour(void* self, void* edx, void* name, int playerType, in
 	g_saveManager = self;
 	char saveName[96];
 	DescribeString(name, saveName, sizeof(saveName));
+	if (playerType == 1) {
+		// Remember player 1's own last save for Continue (see TidyMainPlayerList).
+		const char* text = SaveNameText(static_cast<void* const*>(name));
+		if (text[0]) {
+			wchar_t wide[64];
+			MultiByteToWideChar(CP_ACP, 0, text, -1, wide, 64);
+			WritePrivateProfileStringW(L"State", L"LastMainSave", wide, ConfigPath());
+		}
+	}
 	Log("saves: saving player type %d as %s", playerType, saveName);
 	LogSaveState("at save");
 	const int previous = g_saveUser;
@@ -345,6 +433,17 @@ int CurrentSaveUser()
 void SetPartnerChoiceOverride(const char* choice)
 {
 	strcpy_s(g_partnerOverride, choice ? choice : "");
+}
+
+bool PartnerSavesInMainFolder()
+{
+	return SharedSaveFolder();
+}
+
+std::string LoadedMainSaveName()
+{
+	auto* mgr = static_cast<uint8_t*>(SaveManager());
+	return mgr ? SaveNameText(reinterpret_cast<void* const*>(mgr + addr::kSaveMgrMainName)) : "";
 }
 
 bool InstallSaveHooks()

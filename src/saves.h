@@ -16,6 +16,13 @@ bool InstallSaveHooks();
 // The user whose save folder the save manager is currently using (0 unless overridden).
 int CurrentSaveUser();
 
+// True when player 2's heroes are kept in player 1's save folder (fable3coop.ini SharedSaveFolder).
+bool PartnerSavesInMainFolder();
+
+// Name of the main save currently loaded (e.g. "hero4autosave"), or "" if none.
+#include <string>
+std::string LoadedMainSaveName();
+
 // The save player 2's next join should use (a save name, or "new"), overriding the
 // PartnerSave setting for that one join. Pass nullptr to clear.
 void SetPartnerChoiceOverride(const char* choice);

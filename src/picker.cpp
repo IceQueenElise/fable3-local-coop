@@ -14,6 +14,7 @@
 #include "input.h"
 #include "log.h"
 #include "proxy.h"
+#include "saves.h"
 
 // The PC build ships no layout for the game's generic menu box (MenuBox.bgf, GUI screen 5), so
 // the picker borrows the Options menu (NUI::COptionsMenuBox on Options.bgf): while the picker is
@@ -102,7 +103,8 @@ std::wstring PartnerSaveFolder()
 	using SigninInfoFn = DWORD(WINAPI*)(DWORD user, DWORD flags, XUserSigninInfo* info);
 	static auto signinInfo = reinterpret_cast<SigninInfoFn>(GetProcAddress(GetModuleHandleW(L"xlive.dll"), MAKEINTRESOURCEA(5267)));
 	XUserSigninInfo info = {};
-	if (!signinInfo || signinInfo(kExtraDeviceId, 2, &info) != ERROR_SUCCESS || info.xuid == 0) {
+	const DWORD user = PartnerSavesInMainFolder() ? 0 : kExtraDeviceId;
+	if (!signinInfo || signinInfo(user, 2, &info) != ERROR_SUCCESS || info.xuid == 0) {
 		return {};
 	}
 	PWSTR savedGames = nullptr;
@@ -124,6 +126,8 @@ std::vector<Slot> ListPartnerSlots()
 		Log("picker: player 2's save folder not found");
 		return slots;
 	}
+	// The loaded main save is player 1's hero: never offer it to player 2.
+	const std::string loaded = LoadedMainSaveName();
 	WIN32_FIND_DATAW found;
 	HANDLE find = FindFirstFileW((folder + L"*_herosave.bin").c_str(), &found);
 	if (find == INVALID_HANDLE_VALUE) {
@@ -132,6 +136,12 @@ std::vector<Slot> ListPartnerSlots()
 	do {
 		const std::wstring file = found.cFileName;
 		const std::wstring name = file.substr(0, file.size() - wcslen(L"_herosave.bin"));
+		char nameText[64];
+		WideCharToMultiByte(CP_ACP, 0, name.c_str(), -1, nameText, sizeof(nameText), nullptr, nullptr);
+		if (!loaded.empty() && _stricmp(nameText, loaded.c_str()) == 0) {
+			Log("picker: %s is the loaded main save; not offered", nameText);
+			continue;
+		}
 		const bool henchman = GetFileAttributesW((folder + name + L"_mainsave.bin").c_str()) == INVALID_FILE_ATTRIBUTES;
 		Slot slot;
 		char narrow[64];
