@@ -1,7 +1,8 @@
 ghidra/
 logs/
-backup/claude.json*
 build/
 docs/ghidra/
 extracted/
-backup/saves-*/
+# Local backups (saves, configs) and copies of game files: never commit.
+backup/
+assets/
