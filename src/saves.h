@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // Per-player save folders.
 //
 // Saves live in "Saved Games\Lionhead Studios\Fable 3\<XUID>\", but the PC build always
@@ -19,8 +21,17 @@ int CurrentSaveUser();
 // True when player 2's heroes are kept in player 1's save folder (fable3coop.ini SharedSaveFolder).
 bool PartnerSavesInMainFolder();
 
+// Player 1's save folder ("<Saved Games>\Lionhead Studios\Fable 3\<XUID>\"), or "".
+std::wstring PlayerOneSaveFolder();
+
+// The save in player 1's folder has a world and is owned by player 1's profile, so the main
+// game can load it.
+bool IsLoadableMainSave(const char* name);
+
+// Makes Continue load this save (sets the game's initial save name).
+void SetInitialSaveName(const char* name);
+
 // Name of the main save currently loaded (e.g. "hero4autosave"), or "" if none.
-#include <string>
 std::string LoadedMainSaveName();
 
 // The save player 2's next join should use (a save name, or "new"), overriding the

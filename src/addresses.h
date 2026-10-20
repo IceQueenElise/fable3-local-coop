@@ -221,7 +221,13 @@ constexpr uintptr_t kHeroOnlySaveCalls[] = {0x00753301, 0x00752f05, 0x00753d0a};
 constexpr size_t kSaveMgrMainName = 0x00;       // current main save name, e.g. "hero1autosave"
 constexpr size_t kSaveMgrPartnerName = 0x04;    // couch partner save name; partner save needs it set
 constexpr size_t kSaveMgrPartnerUser = 0x168;   // couch partner's user index, -1 if none
-constexpr uintptr_t kPartnerSaveNameGlobal = 0x01dbd070;  // string; used as the main name when FUN_006a8760
+constexpr uintptr_t kPartnerSaveNameGlobal = 0x01dbd070;
+// Initial save name (string; Lua SetInitialSaveGameName): the save Continue loads. FUN_00752510
+// (__thiscall on the save manager) fills it with the newest usable save; the mode transition
+// FUN_00bbccd0 calls it at kContinuePickCall.
+constexpr uintptr_t kInitialSaveName = 0x01dbd06c;
+constexpr uintptr_t kContinuePick = 0x00752510;
+constexpr uintptr_t kContinuePickCall = 0x00bbcd28;  // string; used as the main name when FUN_006a8760
 // Add-local-player FUN_00bbfa10: void* __cdecl(int user, int, char, void*, void*); it lists the
 // user's saves and loads the chosen hero. Its five call sites:
 constexpr uintptr_t kAddLocalPlayer = 0x00bbfa10;

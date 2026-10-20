@@ -4,6 +4,7 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -38,6 +39,8 @@ struct Slot {
 	std::wstring label;  // entry text
 	std::wstring detail; // description text
 	FILETIME saved;
+	bool isLast = false; // player 1's last save
+	std::string journey; // e.g. "hero6"
 };
 
 // Main page entries, in the box's own numbering ([box+0xCC] = 1..6), by the text tag each shows.
@@ -45,8 +48,10 @@ struct Slot {
 const char* const kEntryTags[] = {"TEXT_GUI_SAVE_MANAGEMENT", "TEXT_GUI_GAME_SETTINGS", "TEXT_GUI_NEW_GAME",
 	"TEXT_GUI_LIVE_DASHBOARD", "TEXT_GUI_LIVE_MARKETPLACE", "TEXT_GUI_EXIT_TO_WINDOWS"};
 constexpr int kEntryCount = sizeof(kEntryTags) / sizeof(kEntryTags[0]);
-constexpr int kHeroEntries[] = {1, 2, 3, 5};  // entries that show heroes, in order
-constexpr int kMoreEntry = 5;                 // with more heroes than fit: next page
+// Player 2: four heroes, "More" (when paging) and "New hero". Player 1: four heroes, the last
+// becoming "More" when paging (new games start from the title screen).
+constexpr int kPartnerHeroEntries[] = {1, 2, 3, 5};
+constexpr int kMainHeroEntries[] = {2, 3, 5, 6};  // the title screen's Options menu hides entry 1 (Save Management)
 constexpr int kNewHeroEntry = 6;
 
 struct Replacement {
@@ -55,6 +60,7 @@ struct Replacement {
 };
 
 bool g_active = false;          // picker owns the Options menu
+bool g_forPlayerTwo = true;     // join picker (player 2) or Continue picker (player 1)
 bool g_menuSeen = false;        // the menu has asked for the picker's text
 DWORD g_requestedAt = 0;
 int g_page = 0;                 // page of heroes shown (when they don't all fit)
@@ -117,11 +123,35 @@ std::wstring PartnerSaveFolder()
 	return folder;
 }
 
-// Every slot with a hero in player 2's folder, newest first.
+// A save's journey (hero playthrough): "hero6autosave" and "hero6save1" are both journey "hero6".
+std::string JourneyOf(const std::string& name)
+{
+	size_t end = 0;
+	while (end < name.size() && !isdigit(static_cast<unsigned char>(name[end]))) {
+		++end;
+	}
+	while (end < name.size() && isdigit(static_cast<unsigned char>(name[end]))) {
+		++end;
+	}
+	return name.substr(0, end);
+}
+
+std::string LastMainSave()
+{
+	wchar_t wide[64];
+	GetPrivateProfileStringW(L"State", L"LastMainSave", L"", wide, 64, ConfigPath());
+	char text[64];
+	WideCharToMultiByte(CP_ACP, 0, wide, -1, text, sizeof(text), nullptr, nullptr);
+	return text;
+}
+
+// Heroes the picker offers, newest first: for player 2 every hero except the loaded main save;
+// for player 1 the main saves the game can load, player 1's last save first.
 std::vector<Slot> ListPartnerSlots()
 {
 	std::vector<Slot> slots;
-	const std::wstring folder = PartnerSaveFolder();
+	const std::wstring folder = g_forPlayerTwo ? PartnerSaveFolder() : PlayerOneSaveFolder();
+	const std::string last = g_forPlayerTwo ? std::string() : LastMainSave();
 	if (folder.empty()) {
 		Log("picker: player 2's save folder not found");
 		return slots;
@@ -138,9 +168,12 @@ std::vector<Slot> ListPartnerSlots()
 		const std::wstring name = file.substr(0, file.size() - wcslen(L"_herosave.bin"));
 		char nameText[64];
 		WideCharToMultiByte(CP_ACP, 0, name.c_str(), -1, nameText, sizeof(nameText), nullptr, nullptr);
-		if (!loaded.empty() && _stricmp(nameText, loaded.c_str()) == 0) {
+		if (g_forPlayerTwo && !loaded.empty() && _stricmp(nameText, loaded.c_str()) == 0) {
 			Log("picker: %s is the loaded main save; not offered", nameText);
 			continue;
+		}
+		if (!g_forPlayerTwo && !IsLoadableMainSave(nameText)) {
+			continue;  // henchman slot, or owned by another profile
 		}
 		const bool henchman = GetFileAttributesW((folder + name + L"_mainsave.bin").c_str()) == INVALID_FILE_ATTRIBUTES;
 		Slot slot;
@@ -155,28 +188,47 @@ std::vector<Slot> ListPartnerSlots()
 			slot.label = nickname;
 		}
 		else {
-			slot.label = name;
-			const size_t suffix = slot.label.find(L"autosave");
-			if (suffix != std::wstring::npos) {
-				slot.label.erase(suffix);
-			}
+			const std::string journey = JourneyOf(narrow);
+			slot.label = std::wstring(journey.begin(), journey.end());
 		}
 		SYSTEMTIME utc, local;
 		FileTimeToSystemTime(&found.ftLastWriteTime, &utc);
 		SystemTimeToTzSpecificLocalTime(nullptr, &utc, &local);
 		static const wchar_t* const kMonths[] = {L"Jan", L"Feb", L"Mar", L"Apr", L"May", L"Jun", L"Jul", L"Aug", L"Sep", L"Oct", L"Nov", L"Dec"};
 		wchar_t detail[128];
-		swprintf_s(detail, L"%s - last played %s %d. Join as this hero.", henchman ? L"Henchman" : L"Hero from a main save",
-			kMonths[(local.wMonth + 11) % 12], local.wDay);
+		if (g_forPlayerTwo) {
+			swprintf_s(detail, L"%s - last played %s %d. Join as this hero.", henchman ? L"Henchman" : L"Hero from a main save",
+				kMonths[(local.wMonth + 11) % 12], local.wDay);
+		}
+		else {
+			swprintf_s(detail, L"Last played %s %d. Continue will load this hero.", kMonths[(local.wMonth + 11) % 12], local.wDay);
+		}
 		slot.detail = detail;
 		if (henchman) {
 			slot.label += L" (Henchman)";
+		}
+		slot.journey = JourneyOf(nameText);
+		slot.isLast = !last.empty() && _stricmp(slot.journey.c_str(), JourneyOf(last).c_str()) == 0;
+		if (slot.isLast) {
+			slot.label += L" (last played)";
 		}
 		slots.push_back(slot);
 	} while (FindNextFileW(find, &found));
 	FindClose(find);
 	std::sort(slots.begin(), slots.end(), [](const Slot& a, const Slot& b) { return CompareFileTime(&a.saved, &b.saved) > 0; });
-	return slots;
+	// One entry per journey: its newest save, or for player 1 the exact save Continue would load.
+	std::vector<Slot> journeys;
+	for (const Slot& slot : slots) {
+		auto existing = std::find_if(journeys.begin(), journeys.end(), [&](const Slot& j) { return _stricmp(j.journey.c_str(), slot.journey.c_str()) == 0; });
+		if (existing == journeys.end()) {
+			journeys.push_back(slot);
+		}
+		else if (!last.empty() && _stricmp(slot.name.c_str(), last.c_str()) == 0) {
+			*existing = slot;
+		}
+	}
+	std::stable_sort(journeys.begin(), journeys.end(), [](const Slot& a, const Slot& b) { return a.isLast && !b.isLast; });
+	return journeys;
 }
 
 void* MainHero()
@@ -244,6 +296,14 @@ void __fastcall SelectDetour(void* box, void* edx, int player)
 		return;
 	}
 	g_picked = g_entryNames[entry - 1];
+	if (!g_forPlayerTwo) {
+		// Continue loads the chosen hero (ContinueDetour reads LastMainSave; the initial save name
+		// covers the case where the game has already picked).
+		wchar_t wide[64];
+		MultiByteToWideChar(CP_ACP, 0, g_picked.c_str(), -1, wide, 64);
+		WritePrivateProfileStringW(L"State", L"LastMainSave", wide, ConfigPath());
+		SetInitialSaveName(g_picked.c_str());
+	}
 	Finish(PickerState::Chosen);
 	reinterpret_cast<CloseFn>((*reinterpret_cast<void***>(box))[addr::kBoxCloseSlot])(box);
 }
@@ -336,7 +396,7 @@ bool OpenPage()
 	auto* root = *reinterpret_cast<uint8_t**>(addr::Rebase(addr::kGuiRoot));
 	auto* holder = root ? *reinterpret_cast<uint8_t**>(root + addr::kGuiRootMenuHolder) : nullptr;
 	void* boxList = holder ? *reinterpret_cast<void**>(holder + addr::kMenuHolderBoxList) : nullptr;
-	if (!hero || !boxList || !g_lookupTrampoline) {
+	if ((!hero && g_forPlayerTwo) || !boxList || !g_lookupTrampoline) {
 		Log("picker: cannot open (hero %p, box list %p)", hero, boxList);
 		return false;
 	}
@@ -347,7 +407,7 @@ bool OpenPage()
 	std::vector<Slot> slots = ListPartnerSlots();
 	g_texts.clear();
 	g_entryNames.assign(kEntryCount, "");
-	AddText("TEXT_GUI_OPTIONS_TITLE", L"Player 2: choose a hero");
+	AddText("TEXT_GUI_OPTIONS_TITLE", g_forPlayerTwo ? L"Player 2: choose a hero" : L"Choose your hero");
 	for (int i = 0; i < kEntryCount; ++i) {
 		const std::string desc = std::string(kEntryTags[i]) + "_DESC";
 		AddText(kEntryTags[i], L"-");
@@ -365,21 +425,25 @@ bool OpenPage()
 			}
 		}
 	};
-	const size_t allEntries = sizeof(kHeroEntries) / sizeof(kHeroEntries[0]);
+	const int* heroEntries = g_forPlayerTwo ? kPartnerHeroEntries : kMainHeroEntries;
+	const size_t allEntries = g_forPlayerTwo ? sizeof(kPartnerHeroEntries) / sizeof(int) : sizeof(kMainHeroEntries) / sizeof(int);
 	const bool paged = slots.size() > allEntries;
 	const size_t perPage = paged ? allEntries - 1 : allEntries;  // paging gives up one entry to "More"
+	const int moreEntry = heroEntries[allEntries - 1];
 	const int pages = paged ? static_cast<int>((slots.size() + perPage - 1) / perPage) : 1;
 	g_page %= pages;
 	const size_t first = static_cast<size_t>(g_page) * perPage;
 	for (size_t i = 0; i < perPage && first + i < slots.size(); ++i) {
-		setEntry(kHeroEntries[i], slots[first + i].name, slots[first + i].label, slots[first + i].detail);
+		setEntry(heroEntries[i], slots[first + i].name, slots[first + i].label, slots[first + i].detail);
 	}
 	if (paged) {
 		wchar_t more[64];
 		swprintf_s(more, L"More heroes... (page %d of %d)", g_page + 1, pages);
-		setEntry(kMoreEntry, "more", more, L"Show the next page of heroes.");
+		setEntry(moreEntry, "more", more, L"Show the next page of heroes.");
 	}
-	setEntry(kNewHeroEntry, "new", L"New hero", L"Join with a brand new hero.");
+	if (g_forPlayerTwo) {
+		setEntry(kNewHeroEntry, "new", L"New hero", L"Join with a brand new hero.");
+	}
 	for (int i = 0; i < kEntryCount; ++i) {
 		Log("picker: page %d entry %d: %s", g_page + 1, i + 1, g_entryNames[i].empty() ? "(unused)" : g_entryNames[i].c_str());
 	}
@@ -388,7 +452,7 @@ bool OpenPage()
 	g_menuSeen = false;
 	g_requestedAt = GetTickCount();
 	reinterpret_cast<OpenOptionsFn>(addr::Rebase(addr::kOpenOptionsMenu))(boxList, nullptr, hero, 0);
-	SetPickerPadSwap(true);
+	SetPickerPadSwap(g_forPlayerTwo);
 	Log("picker: Options menu requested");
 	return true;
 }
@@ -397,9 +461,23 @@ bool OpenPage()
 
 bool OpenPartnerPicker()
 {
+	g_forPlayerTwo = true;
 	g_page = 0;
 	g_reopen = false;
 	return OpenPage();
+}
+
+bool OpenMainPicker()
+{
+	g_forPlayerTwo = false;
+	g_page = 0;
+	g_reopen = false;
+	return OpenPage();
+}
+
+bool PickerIsForPlayerTwo()
+{
+	return g_forPlayerTwo;
 }
 
 PickerState PollPartnerPicker()

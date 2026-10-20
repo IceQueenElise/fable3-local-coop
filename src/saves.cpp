@@ -43,6 +43,7 @@ void* g_saveManager = nullptr;  // seen as this of the save writer
 
 using StringCopyFn = void*(__fastcall*)(void* dst, void* edx, const void* src);  // __thiscall
 using StringDestroyFn = void(__fastcall*)(void* str);
+using StringFromTextFn = void*(__fastcall*)(void* str, void* edx, const char* text, int length);  // __thiscall
 using HeroOnlySaveFn = bool(__fastcall*)(void* self, void* edx, void* name, int playerType, int user, int a);
 HeroOnlySaveFn g_originalHeroOnlySave = nullptr;
 // Save info read FUN_0074b4b0: void __thiscall(?, const string* name, int user, SaveInfo* info).
@@ -229,18 +230,13 @@ std::wstring MainSaveFolder()
 
 // With player 2's heroes in player 1's folder, player 1's sorted save lists (Continue, Load,
 // the save room) would offer them too: hide the hero-only (henchman) slots, which can't be
-// loaded as a main game, and put the last save player 1 made first so Continue picks it rather
-// than player 2's save written in the same second. The unsorted listing (new save names) is left
-// alone so numbers are never reused.
+// loaded as a main game. The unsorted listing (new save names) is left alone so numbers are
+// never reused. Which save Continue loads is set in ContinueDetour.
 void TidyMainPlayerList(uint8_t* list)
 {
 	const std::wstring folder = MainSaveFolder();
 	auto** begin = *reinterpret_cast<void***>(list + addr::kSaveListBegin);
 	auto** end = *reinterpret_cast<void***>(list + addr::kSaveListEnd);
-	char last[64];
-	wchar_t lastWide[64];
-	GetPrivateProfileStringW(L"State", L"LastMainSave", L"", lastWide, 64, ConfigPath());
-	WideCharToMultiByte(CP_ACP, 0, lastWide, -1, last, sizeof(last), nullptr, nullptr);
 	auto** out = begin;
 	for (auto** it = begin; it != end; ++it) {
 		const char* name = SaveNameText(it);
@@ -254,16 +250,6 @@ void TidyMainPlayerList(uint8_t* list)
 		*out++ = *it;
 	}
 	*reinterpret_cast<void***>(list + addr::kSaveListEnd) = out;
-	for (auto** it = begin; last[0] && it != out; ++it) {
-		if (_stricmp(SaveNameText(it), last) == 0) {
-			void* found = *it;
-			for (auto** shift = it; shift != begin; --shift) {
-				*shift = *(shift - 1);
-			}
-			*begin = found;
-			break;
-		}
-	}
 }
 
 void __fastcall EnumerateDetour(void* self, void* edx, int user, void* list, unsigned a, char b)
@@ -402,6 +388,41 @@ void __fastcall SaveDetour(void* self, void* edx, void* name, int playerType, in
 	g_saveUser = previous;
 }
 
+std::string LastMainSaveSetting()
+{
+	wchar_t wide[64];
+	GetPrivateProfileStringW(L"State", L"LastMainSave", L"", wide, 64, ConfigPath());
+	char text[64];
+	WideCharToMultiByte(CP_ACP, 0, wide, -1, text, sizeof(text), nullptr, nullptr);
+	return text;
+}
+
+void SetInitialSaveNameImpl(const char* name)
+{
+	void* str = nullptr;
+	reinterpret_cast<StringFromTextFn>(addr::Rebase(addr::kStringFromText))(&str, nullptr, name, -1);
+	AssignString(reinterpret_cast<void*>(addr::Rebase(addr::kInitialSaveName)), &str);
+	DestroyString(&str);
+}
+
+using ContinuePickFn = void(__fastcall*)(void* saveManager);
+
+// The save Continue loads is picked by FUN_00752510 (the newest usable save) into the initial
+// save name. Player 1's own last save (or the one chosen in the player 1 picker) wins instead,
+// when it can be loaded as a main game.
+void __fastcall ContinueDetour(void* saveManager)
+{
+	reinterpret_cast<ContinuePickFn>(addr::Rebase(addr::kContinuePick))(saveManager);
+	const std::string last = LastMainSaveSetting();
+	if (!last.empty() && IsLoadableMainSave(last.c_str())) {
+		SetInitialSaveNameImpl(last.c_str());
+		Log("saves: Continue loads %s (player 1's last save)", last.c_str());
+	}
+	else {
+		Log("saves: Continue keeps the game's choice (LastMainSave \"%s\" not loadable)", last.c_str());
+	}
+}
+
 // Repoints a "CALL rel32" at siteVa from expectedVa to target.
 bool RedirectCall(uintptr_t siteVa, uintptr_t expectedVa, void* target)
 {
@@ -438,6 +459,51 @@ void SetPartnerChoiceOverride(const char* choice)
 bool PartnerSavesInMainFolder()
 {
 	return SharedSaveFolder();
+}
+
+void SetInitialSaveName(const char* name)
+{
+	SetInitialSaveNameImpl(name);
+}
+
+std::wstring PlayerOneSaveFolder()
+{
+	return MainSaveFolder();
+}
+
+bool IsLoadableMainSave(const char* name)
+{
+	const std::wstring folder = MainSaveFolder();
+	if (folder.empty() || !name || !name[0]) {
+		return false;
+	}
+	wchar_t path[MAX_PATH];
+	swprintf_s(path, L"%s%hs_mainsave.bin", folder.c_str(), name);
+	if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
+		return false;  // hero-only (henchman) slot
+	}
+	// The main game loader only accepts saves owned by player 1's profile (PlayerID in the
+	// chaptersave XML: u64_upper / u64_lower).
+	swprintf_s(path, L"%s%hs_chaptersave.bin", folder.c_str(), name);
+	HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+	if (file == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	char xml[8192] = {};
+	DWORD read = 0;
+	ReadFile(file, xml, sizeof(xml) - 1, &read, nullptr);
+	CloseHandle(file);
+	const char* upper = strstr(xml, "<u64_upper type=\"uint\">");
+	const char* lower = strstr(xml, "<u64_lower type=\"uint\">");
+	XUserSigninInfoLite info = {};
+	if (!upper || !lower || !g_signinInfo || g_signinInfo(0, 2, &info) != ERROR_SUCCESS) {
+		return true;  // can't tell; let the game decide
+	}
+	const unsigned long long owner = (static_cast<unsigned long long>(strtoul(upper + strlen("<u64_upper type=\"uint\">"), nullptr, 10)) << 32)
+		| strtoul(lower + strlen("<u64_lower type=\"uint\">"), nullptr, 10);
+	// The XML stores the XUID's halves swapped relative to the XUID value.
+	const unsigned long long swapped = (owner << 32) | (owner >> 32);
+	return owner == info.xuid || swapped == info.xuid;
 }
 
 std::string LoadedMainSaveName()
@@ -481,6 +547,8 @@ bool InstallSaveHooks()
 		++expected;
 	}
 	patched += RedirectCall(addr::kJoinReadSaveInfoCall, addr::kReadSaveInfo, reinterpret_cast<void*>(&JoinSaveInfoDetour));
+	++expected;
+	patched += RedirectCall(addr::kContinuePickCall, addr::kContinuePick, reinterpret_cast<void*>(&ContinueDetour));
 	++expected;
 	Log("saves: %d of %d call sites patched", patched, expected);
 	return patched == expected;

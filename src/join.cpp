@@ -192,6 +192,7 @@ bool OfferJoin()
 }
 
 DWORD g_joinAfterPickerUntil = 0;  // retry the join until this tick after a picker choice
+DWORD g_handledBackPress = 0;
 
 }  // namespace
 
@@ -202,17 +203,33 @@ void PumpExtraPadJoin()
 	UpdateCouchGuiInput();
 	switch (PollPartnerPicker()) {
 	case PickerState::Chosen:
+		if (!PickerIsForPlayerTwo()) {
+			Log("picker: Continue will load %s", PickedPartnerSave());
+			g_handledBackPress = LastBackPress(0);
+			return;
+		}
 		SetPartnerChoiceOverride(PickedPartnerSave());
 		g_joinAfterPickerUntil = GetTickCount() + 3000;
 		g_handledStartPress = LastStartPress(kExtraPad);
 		break;
 	case PickerState::Cancelled:
 		g_handledStartPress = LastStartPress(kExtraPad);  // the press that closed the menu
+		g_handledBackPress = LastBackPress(0);
 		return;
 	case PickerState::Open:
 		return;
 	default:
 		break;
+	}
+	// Title screen (no game mode yet): player 1's BACK opens the hero picker for Continue.
+	const DWORD backAt = LastBackPress(0);
+	if (backAt != 0 && backAt != g_handledBackPress) {
+		g_handledBackPress = backAt;
+		if (GameModeId() == -1 && reinterpret_cast<IntFn>(addr::Rebase(addr::kGetMode))() != 1) {
+			Log("pad 0 BACK on the title screen: opening the hero picker");
+			OpenMainPicker();
+			return;
+		}
 	}
 	// The menu may still be closing on the frame of the choice; keep offering the join briefly.
 	if (g_joinAfterPickerUntil) {

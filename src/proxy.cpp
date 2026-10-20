@@ -38,6 +38,8 @@ void NoteCall(const char* name, int slot, DWORD user)
 volatile bool g_pickerPadSwap = false;
 volatile DWORD g_startPressedAt[XUSER_MAX_COUNT];
 bool g_startDown[XUSER_MAX_COUNT];
+volatile DWORD g_backPressedAt[XUSER_MAX_COUNT];
+bool g_backDown[XUSER_MAX_COUNT];
 
 void TrackStart(DWORD pad, const XINPUT_STATE* state)
 {
@@ -49,6 +51,11 @@ void TrackStart(DWORD pad, const XINPUT_STATE* state)
 		g_startPressedAt[pad] = GetTickCount();
 	}
 	g_startDown[pad] = down;
+	const bool backDown = (state->Gamepad.wButtons & XINPUT_GAMEPAD_BACK) != 0;
+	if (backDown && !g_backDown[pad]) {
+		g_backPressedAt[pad] = GetTickCount();
+	}
+	g_backDown[pad] = backDown;
 }
 
 }  // namespace
@@ -56,6 +63,11 @@ void TrackStart(DWORD pad, const XINPUT_STATE* state)
 DWORD LastStartPress(DWORD pad)
 {
 	return pad < XUSER_MAX_COUNT ? g_startPressedAt[pad] : 0;
+}
+
+DWORD LastBackPress(DWORD pad)
+{
+	return pad < XUSER_MAX_COUNT ? g_backPressedAt[pad] : 0;
 }
 
 void SetPickerPadSwap(bool on)

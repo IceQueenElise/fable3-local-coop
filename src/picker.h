@@ -18,6 +18,13 @@ bool InstallPicker();
 // Opens the picker. False if the menu could not be requested.
 bool OpenPartnerPicker();
 
+// Player 1's Continue picker (title screen): main saves player 1 can load, last played first.
+// Choosing one makes Continue load it (LastMainSave and the game's initial save name).
+bool OpenMainPicker();
+
+// Whether the picker last opened is player 2's join picker.
+bool PickerIsForPlayerTwo();
+
 // Returns Chosen or Cancelled once, after the menu closes; after Chosen, PickedPartnerSave()
 // holds the save name, or "new" for a new hero.
 PickerState PollPartnerPicker();

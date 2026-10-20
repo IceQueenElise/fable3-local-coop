@@ -206,3 +206,8 @@ void UpdateCouchGuiInput()
 		Register(couch);
 	}
 }
+
+int GameModeId()
+{
+	return CurrentGameMode();
+}

@@ -19,6 +19,10 @@ void UpdateCouchGuiInput();
 // Pause menu or Sanctuary is up. Calls into the game; use on the game thread.
 bool IsGuiOpen();
 
+// Id of the game mode on top of the mode stack (6 gameplay, 8 pause, 1 Sanctuary, 4 loading),
+// or -1 when there is none (title screen). Game thread only.
+int GameModeId();
+
 // Player 2 has the pause menu / Sanctuary open. Cached once per frame; safe from any thread.
 bool CouchPlayerHasMenu();
 
