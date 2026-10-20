@@ -12,10 +12,13 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # The game loads xinput1_3.dll from its own folder first, so the mod ships under that name.
 add_library(xinput1_3 SHARED
 	src/bindings.cpp
+	src/custommenu.cpp
 	src/dllmain.cpp
 	src/fixes.cpp
 	src/gui.cpp
+	src/guiscreen.cpp
 	src/log.cpp
+	src/luaprobe.cpp
 	src/proxy.cpp
 	src/input.cpp
 	src/join.cpp

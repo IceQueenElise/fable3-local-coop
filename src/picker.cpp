@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "addresses.h"
+#include "custommenu.h"
 #include "input.h"
 #include "log.h"
 #include "proxy.h"
@@ -663,7 +664,7 @@ bool OpenPage()
 	auto* root = *reinterpret_cast<uint8_t**>(addr::Rebase(addr::kGuiRoot));
 	auto* holder = root ? *reinterpret_cast<uint8_t**>(root + addr::kGuiRootMenuHolder) : nullptr;
 	void* boxList = holder ? *reinterpret_cast<void**>(holder + addr::kMenuHolderBoxList) : nullptr;
-	if ((!hero && g_forPlayerTwo) || !boxList || !g_lookupTrampoline) {
+	if ((!hero && g_forPlayerTwo) || !boxList || !g_lookupTrampoline || CustomMenuIsOpen()) {
 		Log("picker: cannot open (hero %p, box list %p)", hero, boxList);
 		return false;
 	}
@@ -701,6 +702,11 @@ bool OpenMainPicker()
 	g_page = 0;
 	g_reopen = false;
 	return OpenPage();
+}
+
+bool PickerIsOpen()
+{
+	return g_active;
 }
 
 bool PickerIsForPlayerTwo()

@@ -3,8 +3,10 @@
 #include <cstdint>
 
 #include "addresses.h"
+#include "custommenu.h"
 #include "join.h"
 #include "log.h"
+#include "luaprobe.h"
 #include "proxy.h"
 
 namespace {
@@ -118,6 +120,8 @@ void __fastcall HotplugDetour(void* manager, void* edx)
 	HotplugExtraPad(manager);
 	// Runs every frame on the game thread, the same thread as the GUI input handlers.
 	PumpExtraPadJoin();
+	PumpLuaProbe();
+	PumpCustomMenu();
 }
 
 bool IsExpectedBuild()

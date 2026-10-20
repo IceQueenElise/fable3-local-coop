@@ -9,3 +9,5 @@ Run from a working folder that has a `bnk/` subfolder (output goes there; keep i
   constants, locals and function names are.
 - `luafuncs.py <file> <regex>`: prints the constants and locals of the functions whose names match.
 - `luagrep.py <name>`, `luagrep2.py <name...>`: finds the script functions that use every given constant.
+- `guiextract.py <bank.bnk> <outdir>`: extracts every file of a VFS bank such as `guiscripts.bnk`
+  (the GUI screens: `.bgf`/`.bsg`/`.fac` per screen, plus Gameface Lua). Keep the output out of the repo.

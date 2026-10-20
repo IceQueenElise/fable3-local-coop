@@ -1,6 +1,7 @@
 #include <windows.h>
 
 #include "bindings.h"
+#include "custommenu.h"
 #include "fixes.h"
 #include "gui.h"
 #include "input.h"
@@ -30,6 +31,7 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID)
 			InstallGuiHooks();
 			InstallFixes();
 			InstallPicker();
+			InstallCustomMenu();  // after the picker: its close hook chains to the picker's
 			InstallSaveHooks();
 			InstallSaveFileLog();
 			InstallNetProbe();

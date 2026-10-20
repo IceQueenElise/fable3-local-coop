@@ -121,6 +121,16 @@ constexpr uintptr_t kWideStringDestroy = 0x019ffa70; // void __thiscall(wstring*
 // GUI screen loader FUN_00d30040: void __thiscall(screens, int id); ids map to .bgf files
 // (0 MessageBoxMulti, 4 DisplayBox, 5 MenuBox, 7 QueryBox, 0x10 BedMenuBox, 0x11 Options, ...).
 constexpr uintptr_t kScreenLoad = 0x00d30040;
+// Run a Gameface Lua chunk on a loaded screen (the game's own scriptlets, e.g.
+// "setAttribute(getElement('Scene.Layer'), 'opacity', 0)"): void __cdecl(const string* script,
+// screen). It may queue the chunk instead of running it at once (screen manager byte +0x94 clear).
+// The chunk sees the Gameface element API (FUN_019fc750): getElement, getChildren, get/set/
+// hasAttribute, clone(src, name[, parent]) (name hashed like native paths), goToSlide, ...
+constexpr uintptr_t kRunScreenLua = 0x010146d0;
+// Pointer to Gameface's log sink, void __cdecl(int level, const char* message): Lua output() lines
+// and script errors (level 0 message, 1 warning, 2 error, 3 critical). Default: OutputDebugString.
+constexpr uintptr_t kLuaLogCallback = 0x01dadbb4;
+constexpr size_t kScreensSharedId = 0x9c;       // id of the screen in the shared slot
 // Game string from text: string* __thiscall(string*, const char* text, int length or -1).
 constexpr uintptr_t kStringFromText = 0x01a01cc0;
 // Wide game string from text: wstring* __thiscall(wstring*, const wchar_t* text, int length or -1).
@@ -145,6 +155,13 @@ constexpr uintptr_t kOptionsSetEntry = 0x00be8830;
 constexpr uintptr_t kOptionsSetEntryCalls[] = {0x00be9736, 0x00be98ec, 0x00bea2d2};
 constexpr uintptr_t kOptionsMenuVtable = 0x01b1e494;
 constexpr size_t kBoxCloseSlot = 2;
+// Input handler FUN_00bf0ab0, char __thiscall(box, const int* action, int player), RET 8: up
+// 0x1e/0x26/0x2e, down 0x1f/0x27/0x2f, select 0x5d/0x5f, back 0x60, close 0xe, mouse hover 0x1d.
+constexpr size_t kOptionsInputSlot = 4;
+// FUN_0135d610 int __cdecl(int action, int player) turns a stick action (kActionLeftStick /
+// kActionRightStick) into a direction action (0x1e up, 0x1f down, ...) using the stick's position
+// and dead zone, as the Options input handler does.
+constexpr uintptr_t kStickAction = 0x0135d610;
 constexpr size_t kOptionsPage = 0xc8;
 constexpr size_t kOptionsEntry = 0xcc;
 constexpr int kOptionsMainPage = 1;

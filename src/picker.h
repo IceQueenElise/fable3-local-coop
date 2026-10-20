@@ -22,6 +22,9 @@ bool OpenPartnerPicker();
 // Choosing one makes Continue load it (LastMainSave and the game's initial save name).
 bool OpenMainPicker();
 
+// The picker owns the Options menu (requested or open).
+bool PickerIsOpen();
+
 // Whether the picker last opened is player 2's join picker.
 bool PickerIsForPlayerTwo();
 
