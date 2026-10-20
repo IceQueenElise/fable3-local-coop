@@ -30,8 +30,7 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID)
 			InstallInputRouting();
 			InstallGuiHooks();
 			InstallFixes();
-			InstallPicker();
-			InstallCustomMenu();  // after the picker: its close hook chains to the picker's
+			InstallCustomMenu();
 			InstallSaveHooks();
 			InstallSaveFileLog();
 			InstallNetProbe();

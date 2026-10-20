@@ -11,7 +11,6 @@
 #include "addresses.h"
 #include "guiscreen.h"
 #include "log.h"
-#include "picker.h"
 
 namespace {
 
@@ -27,8 +26,6 @@ constexpr int kNativeRows = 6;       // up to this many keep the game's own spac
 // the title screen's list sits 30 higher because its first row (Save Management) is hidden.
 constexpr float kFirstRowY = 130.0f;
 constexpr DWORD kOpenTimeoutMs = 3000;
-constexpr DWORD kRefreshMs = 500;
-constexpr DWORD kEagerRefreshMs = 1500;  // after opening, re-hide every frame (the open animation)
 constexpr DWORD kRestoreDelayMs = 1500;  // after closing, for the close animation to finish
 // Move actions keep arriving while a direction is held: one step, then repeats after a delay.
 constexpr DWORD kHeldGapMs = 100;        // a same-direction action this soon after the last is a hold
@@ -44,7 +41,7 @@ bool IsBack(int action) { return action == 0x60 || action == 0x0e; }
 enum class Phase { Closed, Waiting, Labelling, Ready };
 
 InputFn g_originalInput = nullptr;
-CloseFn g_previousClose = nullptr;  // the picker's close detour, which chains to the game's
+CloseFn g_originalClose = nullptr;
 
 Phase g_phase = Phase::Closed;
 std::wstring g_title;
@@ -56,7 +53,6 @@ int g_top = 0;                 // item shown on the first row
 void* g_screen = nullptr;
 DWORD g_requestedAt = 0;
 DWORD g_builtAt = 0;
-DWORD g_nextRefresh = 0;
 void* g_restoreScreen = nullptr;  // closed menu's screen, put back once its close animation is over
 DWORD g_restoreAt = 0;
 int g_heldDirection = 0;
@@ -79,8 +75,8 @@ local function each(p, f) local e = el(p) if not e then return end local ok, c =
 local layouts = { { 'Scene.Layer.Options.Sections.Options', 'SelectionTitle' }, { 'Scene.Layer.Options.Sections.Multiplayer', 'SelectionText' } }
 )";
 
-// Only x is moved: the game re-applies opacity to some rows every frame, and x is the one
-// attribute of these elements it never animates (all of them sit at x 0).
+// Only x is moved: the game re-applies opacity to some rows every frame, but has not been seen to
+// touch x (all of these elements sit at x 0).
 const char kLuaHide[] = R"(
 for _, l in ipairs(layouts) do
 	each(l[1] .. '.' .. l[2], function(x) set(x, 'position.x', OFF) end)
@@ -173,6 +169,7 @@ std::string BuildChunk()
 	return std::string(kLuaPrelude) + values + kLuaBuild + kLuaHide;
 }
 
+// Moves the bar onto the cursor's row.
 std::string BarChunk()
 {
 	char values[128];
@@ -292,7 +289,7 @@ void __fastcall CloseDetour(void* box)
 		g_phase = Phase::Closed;
 		g_screen = nullptr;
 	}
-	g_previousClose(box);
+	g_originalClose(box);
 }
 
 bool HookSlot(size_t slot, void* detour, uintptr_t* previous)
@@ -347,7 +344,7 @@ bool InstallCustomMenu()
 	const bool ok = HookSlot(addr::kOptionsInputSlot, reinterpret_cast<void*>(&InputDetour), &input) &&
 		HookSlot(addr::kBoxCloseSlot, reinterpret_cast<void*>(&CloseDetour), &close);
 	g_originalInput = reinterpret_cast<InputFn>(input);
-	g_previousClose = reinterpret_cast<CloseFn>(close);
+	g_originalClose = reinterpret_cast<CloseFn>(close);
 	Log("custom menu: Options box hooks %s", ok ? "installed" : "not installed");
 	return ok;
 }
@@ -357,9 +354,9 @@ bool OpenCustomMenu(const std::wstring& title, const std::vector<CustomMenuItem>
 	auto* root = *reinterpret_cast<uint8_t**>(addr::Rebase(addr::kGuiRoot));
 	auto* holder = root ? *reinterpret_cast<uint8_t**>(root + addr::kGuiRootMenuHolder) : nullptr;
 	void* boxList = holder ? *reinterpret_cast<void**>(holder + addr::kMenuHolderBoxList) : nullptr;
-	if (items.empty() || g_phase != Phase::Closed || PickerIsOpen() || !boxList || !g_originalInput) {
-		Log("custom menu: cannot open (%u items, phase %d, picker %d, box list %p)", static_cast<unsigned>(items.size()),
-			static_cast<int>(g_phase), PickerIsOpen() ? 1 : 0, boxList);
+	if (items.empty() || g_phase != Phase::Closed || !boxList || !g_originalInput) {
+		Log("custom menu: cannot open (%u items, phase %d, box list %p)", static_cast<unsigned>(items.size()),
+			static_cast<int>(g_phase), boxList);
 		return false;
 	}
 	if (*reinterpret_cast<int*>(root + addr::kGuiRootMenuLock) > 0) {
@@ -409,7 +406,8 @@ void PumpCustomMenu()
 {
 	const DWORD now = GetTickCount();
 	if (g_restoreScreen && static_cast<int>(now - g_restoreAt) >= 0) {
-		// Only a reused screen needs it; a fresh instance comes with its own rows.
+		// Only a reused screen needs it; each open has so far had a fresh instance with its own
+		// rows. Never sooner: input still reaches the closing box, and its fade would show them.
 		if (FindGuiScreen(addr::kOptionsScreenId) == g_restoreScreen) {
 			RunGuiLua(g_restoreScreen, std::string(kLuaPrelude) + kLuaRestore);
 			Log("custom menu: original rows put back on screen %p", g_restoreScreen);
@@ -424,7 +422,7 @@ void PumpCustomMenu()
 			RunGuiLua(g_screen, BuildChunk());
 			g_builtAt = now;
 			g_phase = Phase::Labelling;
-			Log("custom menu: rows built on screen %p; clones %s on the same frame", g_screen, ClonesPresent() ? "present" : "not yet present");
+			Log("custom menu: rows built on screen %p", g_screen);
 		}
 		else if (now - g_requestedAt > kOpenTimeoutMs) {
 			Log("custom menu: the Options menu never appeared");
@@ -434,29 +432,19 @@ void PumpCustomMenu()
 	}
 	if (g_phase == Phase::Labelling) {
 		if (FindGuiScreen(addr::kOptionsScreenId) != g_screen) {
-			Log("custom menu: the screen changed before the rows were labelled");
+			Log("custom menu: the screen changed before the rows were labelled; building again");
+			g_phase = Phase::Waiting;
 		}
 		else if (ClonesPresent()) {
 			ApplyRowLabels();
 			ApplyDescription();
 			RunGuiLua(g_screen, BarChunk());
 			g_phase = Phase::Ready;
-			g_nextRefresh = now;
 			Log("custom menu: ready after %lu ms", now - g_builtAt);
 		}
 		else if (now - g_builtAt > kOpenTimeoutMs) {
 			Log("custom menu: the cloned rows never appeared");
 			g_builtAt = now;  // keep waiting; back still closes the menu
-		}
-	}
-	if (g_phase == Phase::Ready && static_cast<int>(now - g_nextRefresh) >= 0) {
-		// The menu's open animation and text setup may put the originals, the bar or the title
-		// back: every frame at first, then twice a second.
-		g_nextRefresh = now - g_builtAt < kEagerRefreshMs ? now : now + kRefreshMs;
-		if (FindGuiScreen(addr::kOptionsScreenId) == g_screen) {
-			RunGuiLua(g_screen, std::string(kLuaPrelude) + kLuaHide);
-			RunGuiLua(g_screen, BarChunk());
-			ApplyRowLabels();
 		}
 	}
 	PumpTest();

@@ -35,6 +35,7 @@ target_link_libraries(xinput1_3 PRIVATE shell32 ole32)
 
 set(FABLE3_DIR "F:/Fit Games/Fable 3" CACHE PATH "Fable III install folder for the deploy target")
 add_custom_target(deploy
-	COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:xinput1_3> "${FABLE3_DIR}/xinput1_3.dll"	DEPENDS xinput1_3
+	COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:xinput1_3> "${FABLE3_DIR}/xinput1_3.dll"
+	DEPENDS xinput1_3
 	COMMENT "Copying xinput1_3.dll into ${FABLE3_DIR}"
 )

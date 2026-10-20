@@ -104,7 +104,8 @@ constexpr size_t kDisplayBoxesCurrent = 0x20;   // list: current box
 constexpr uintptr_t kDisplayBoxBusy = 0x00bbd3f0;
 constexpr size_t kGuiRootScreens = 0x34;        // GUI screen table: screen n at +8 + 4n (FUN_00d2f660)
 constexpr size_t kScreensFirst = 0x08;
-constexpr size_t kScreensShared = 0xa0;         // shared slot (screen id at +0x9C), FUN_00d30040
+constexpr size_t kScreensShared = 0xa0;         // shared slot, FUN_00d30040
+constexpr size_t kScreensSharedId = 0x9c;       // id of the screen in the shared slot
 constexpr int kMenuBoxScreenId = 5;
 constexpr int kOptionsScreenId = 0x11;       // Options.bgf
 // Show/hide a screen element by dotted path from "Layer" (segments hashed h*0x1003F + c by
@@ -116,8 +117,7 @@ constexpr uintptr_t kSetElementText = 0x010142d0;
 // Element opacity on a screen's presentation (negative = hidden): read FUN_01014440
 // float __cdecl(element, screen, char raw); write FUN_010143b0 void __cdecl(element, screen, float).
 constexpr uintptr_t kGetElementOpacity = 0x01014440;
-constexpr uintptr_t kSetElementOpacity = 0x010143b0;   // void __cdecl(element, screen, const wstring* text)
-constexpr uintptr_t kWideStringDestroy = 0x019ffa70; // void __thiscall(wstring*)  // MenuBox.bgf: not shipped on PC, so the menu box never shows
+constexpr uintptr_t kWideStringDestroy = 0x019ffa70; // void __thiscall(wstring*)
 // GUI screen loader FUN_00d30040: void __thiscall(screens, int id); ids map to .bgf files
 // (0 MessageBoxMulti, 4 DisplayBox, 5 MenuBox, 7 QueryBox, 0x10 BedMenuBox, 0x11 Options, ...).
 constexpr uintptr_t kScreenLoad = 0x00d30040;
@@ -130,29 +130,16 @@ constexpr uintptr_t kRunScreenLua = 0x010146d0;
 // Pointer to Gameface's log sink, void __cdecl(int level, const char* message): Lua output() lines
 // and script errors (level 0 message, 1 warning, 2 error, 3 critical). Default: OutputDebugString.
 constexpr uintptr_t kLuaLogCallback = 0x01dadbb4;
-constexpr size_t kScreensSharedId = 0x9c;       // id of the screen in the shared slot
 // Game string from text: string* __thiscall(string*, const char* text, int length or -1).
 constexpr uintptr_t kStringFromText = 0x01a01cc0;
 // Wide game string from text: wstring* __thiscall(wstring*, const wchar_t* text, int length or -1).
 constexpr uintptr_t kWideStringAssign = 0x01a00310;
-// Text database: tag -> key (FNV) FUN_0071f870 uint* __thiscall(uint* key, const string* tag);
-// lookup FUN_00720310 wstring* __thiscall(db, wstring* out, const uint* key), RET 8.
-constexpr uintptr_t kTextTagHash = 0x0071f870;
-constexpr uintptr_t kTextLookup = 0x00720310;
 // Options menu (NUI::COptionsMenuBox, display box type 0xF on Options.bgf, GUI screen 0x11).
 // Opened by FUN_00bbd860 void __thiscall(box list, CEntity* owner, char inGame), RET 8, on
-// the box list [[*kGuiRoot + 0x18] + 0x34] (Lua OpenOptionsScreen). Its input handler calls the
-// selection FUN_00beefe0 void __thiscall(box, int player) at kOptionsSelectCall; on the main page
-// ([box+0xC8] 1 or 4) entry [box+0xCC] 1..6 runs Save Management, Game Settings, New Game, Live
-// Guide, Marketplace, Exit. Box vtable slot 2 closes it.
+// the box list [[*kGuiRoot + 0x18] + 0x34] (Lua OpenOptionsScreen). Box vtable slot 2 closes it.
+// (Its selection, highlight setter and page/entry fields are in findings R36.)
 constexpr uintptr_t kOpenOptionsMenu = 0x00bbd860;
 constexpr size_t kGuiRootMenuLock = 0x120;  // int; the opener does nothing while > 0
-constexpr uintptr_t kOptionsSelect = 0x00beefe0;
-constexpr uintptr_t kOptionsSelectCall = 0x00bf0d8b;
-// Main page highlight setter FUN_00be8830 void __thiscall(box, int entry), called by down
-// (FUN_00be9580), up (FUN_00be9760) and mouse hover (FUN_00bea280).
-constexpr uintptr_t kOptionsSetEntry = 0x00be8830;
-constexpr uintptr_t kOptionsSetEntryCalls[] = {0x00be9736, 0x00be98ec, 0x00bea2d2};
 constexpr uintptr_t kOptionsMenuVtable = 0x01b1e494;
 constexpr size_t kBoxCloseSlot = 2;
 // Input handler FUN_00bf0ab0, char __thiscall(box, const int* action, int player), RET 8: up
@@ -162,10 +149,6 @@ constexpr size_t kOptionsInputSlot = 4;
 // kActionRightStick) into a direction action (0x1e up, 0x1f down, ...) using the stick's position
 // and dead zone, as the Options input handler does.
 constexpr uintptr_t kStickAction = 0x0135d610;
-constexpr size_t kOptionsPage = 0xc8;
-constexpr size_t kOptionsEntry = 0xcc;
-constexpr int kOptionsMainPage = 1;
-constexpr int kOptionsMainPageAlt = 4;
 constexpr size_t kSessionCouchFlags = 0x58;
 constexpr size_t kCanCouchPlayerEnterGui = 0x8d;
 

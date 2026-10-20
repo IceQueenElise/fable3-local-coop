@@ -11,7 +11,7 @@
 // description line, and C++ labels them. While it is open the Options box's input handler is
 // taken over: up/down move our cursor (the rows scroll when there are more items than rows),
 // select chooses, and back closes the menu the game's own way. On close the originals are put
-// back, since the screen instance can be reused.
+// back, since the screen instance can be reused. The hero pickers (picker.cpp) are built on it.
 //
 // With MenuTest=1 in fable3coop.ini, F8 (MenuTestKey) opens a 12-item test menu.
 //
@@ -24,8 +24,8 @@ struct CustomMenuItem {
 
 enum class CustomMenuState { Closed, Open, Chosen, Cancelled };
 
-// Hooks the Options box's input handler and close. Call after InstallPicker (the close hook
-// chains to the picker's).
+// Hooks the Options box's input handler and close. Call after InstallInputHooks has set the
+// image base.
 bool InstallCustomMenu();
 
 // Opens a menu. False if the game is not taking menus right now or another menu owns the box.
