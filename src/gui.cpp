@@ -91,6 +91,11 @@ void __fastcall ActionDetour(void* self, void* edx, const int* action)
 		(couchInput ? g_lastCouchButton : g_lastMainButton) = GetTickCount();
 		NoteActionId(couchInput, id);
 	}
+	if (couchInput && id == addr::kActionOpenMap) {
+		// Player 2's Back should only teleport them to player 1 (its other action); the world map
+		// is shared and would open for player 1.
+		return;
+	}
 	g_originalAction(self, edx, action);
 }
 

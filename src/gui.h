@@ -5,7 +5,8 @@
 // The PC build creates one NUI::CGUIInput, always bound to the main player, so only player
 // 1's START opens the pause menu and nobody's Back teleports the couch partner. While player
 // 2 is in the game, a second CGUIInput bound to player 2's CPlayer is registered with the
-// game's input system, so their controls get the same GUI actions.
+// game's input system, so their controls get the same GUI actions, except that player 2's Back
+// doesn't open the (shared) world map; it only teleports them to player 1.
 //
 // The menus read player 1's thumbsticks, so while player 2 owns the open menu the XInput
 // exports swap the two pads' thumbstick values (proxy.cpp).

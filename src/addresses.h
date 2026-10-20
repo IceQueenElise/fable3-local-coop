@@ -183,6 +183,10 @@ constexpr uintptr_t kCurrentGameMode = 0x006e2bb0;
 constexpr uintptr_t kGuiInputActionSlot = 0x01b1a254 + 0x04;
 constexpr uintptr_t kGuiInputAction = 0x00b9bfd0;
 constexpr int kActionOpenPause = 0x0e;  // START: opens the pause menu (mode 8)
+// Back sends 0x57 and 0x5b. 0x57 in gameplay teleports a slot-2 (couch) player to the main hero
+// (FUN_00b9bf90 -> FUN_00b9be30). 0x5b opens the world map (game mode 12, FUN_00b9b900) unless
+// the game's IsMapDisabled says no, which it does until the Sanctuary is unlocked.
+constexpr int kActionOpenMap = 0x5b;
 constexpr int kActionLeftStick = 0x1b;
 constexpr int kActionRightStick = 0x1c;
 
@@ -192,7 +196,7 @@ constexpr size_t kGuiInputRightMoved = 0x05;  // byte
 constexpr size_t kGuiInputLeftStick = 0x1c;   // float x, y
 constexpr size_t kGuiInputRightStick = 0x24;  // float x, y
 
-// Game modes (CurrentGameMode): 6 gameplay, 8 pause menu, 1 Sanctuary GUI.
+// Game modes (CurrentGameMode): 6 gameplay, 8 pause menu, 1 Sanctuary GUI, 12 world map.
 constexpr int kModeSanctuary = 1;
 constexpr int kModePauseMenu = 8;
 
