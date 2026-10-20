@@ -62,6 +62,9 @@ struct Replacement {
 bool g_active = false;          // picker owns the Options menu
 bool g_forPlayerTwo = true;     // join picker (player 2) or Continue picker (player 1)
 bool g_menuSeen = false;        // the menu has asked for the picker's text
+bool g_liveHidden = false;      // the LIVE entry (a logo, not text) has been hidden
+DWORD g_restoreLiveAt = 0;      // show it again a moment after the picker closes (no flash)
+int g_hidePasses = 0;           // hide passes since the menu opened (diagnostics)
 DWORD g_requestedAt = 0;
 int g_page = 0;                 // page of heroes shown (when they don't all fit)
 bool g_reopen = false;          // "More heroes" chosen: reopen on the next page
@@ -72,6 +75,82 @@ PickerState g_result = PickerState::Closed;
 std::string g_picked;
 uint8_t* g_lookupTrampoline = nullptr;
 CloseFn g_originalClose = nullptr;
+
+using FindElementFn = void*(__cdecl*)(void* pathByValue, void* parent, void* screen);  // destroys the path string
+using IsVisibleFn = char(__cdecl*)(void* element, void* screen);
+using GetOpacityFn = float(__cdecl*)(void* element, void* screen, char raw);
+using SetOpacityFn = void(__cdecl*)(void* element, void* screen, float opacity);
+
+struct SavedOpacity {
+	void* element;
+	void* screen;
+	float opacity;
+};
+std::vector<SavedOpacity> g_savedOpacity;  // LIVE elements' opacity before the picker hid them
+
+// The Options menu's 4th entry is the Games for Windows LIVE logo, not text, so it can't be
+// relabelled; hide its logo, mouse hotspot and description while the picker owns the menu.
+void SetLiveEntryVisible(bool visible)
+{
+	// The Options screen can be in its own slot of the screen table or in the shared slot (a
+	// reopened menu gets a fresh instance there): apply to both.
+	auto* root = *reinterpret_cast<uint8_t**>(addr::Rebase(addr::kGuiRoot));
+	auto* screens = root ? *reinterpret_cast<uint8_t**>(root + addr::kGuiRootScreens) : nullptr;
+	if (!screens) {
+		return;
+	}
+	void* const candidates[] = {*reinterpret_cast<void**>(screens + addr::kScreensFirst + 4 * addr::kOptionsScreenId),
+		*reinterpret_cast<void**>(screens + addr::kScreensShared)};
+	// Both layouts of the menu: "Options" (title screen) and "Multiplayer" (in game). Paths that
+	// don't exist on the current screen are ignored by the game.
+	static const char* const kParts[] = {"Options.Sections.Options.SelectionTitle.Live_Logo",
+		"Options.Sections.Options.MouseHotspots.LiveHotspot", "Options.Sections.Options.SelectionDesription.LiveDescription",
+		"Options.Sections.Multiplayer.SelectionText.Live_Logo", "Options.Sections.Multiplayer.SelectionText.Live",
+		"Options.Sections.Multiplayer.SelectionDesription.Live", "Options.Sections.Multiplayer.MouseHotspots.LiveHotspot"};
+	// Diagnostics: on the first pass after each open and about a second later.
+	const bool diagnose = LogEnabled() && (g_hidePasses == 0 || g_hidePasses == 10);
+	++g_hidePasses;
+	// Opacity is written directly: the menu's own animations make the logo visible again, and the
+	// game's show/hide helper skips elements it believes are already hidden.
+	for (void* screen : candidates) {
+		if (!screen) {
+			continue;
+		}
+		for (const char* part : kParts) {
+			void* path = nullptr;  // taken by value and destroyed by the lookup
+			reinterpret_cast<StringFromTextFn>(addr::Rebase(addr::kStringFromText))(&path, nullptr, part, -1);
+			void* element = reinterpret_cast<FindElementFn>(addr::Rebase(addr::kFindElement))(path, nullptr, screen);
+			if (!element) {
+				continue;
+			}
+			auto saved = std::find_if(g_savedOpacity.begin(), g_savedOpacity.end(),
+				[&](const SavedOpacity& entry) { return entry.element == element && entry.screen == screen; });
+			const float now = reinterpret_cast<GetOpacityFn>(addr::Rebase(addr::kGetElementOpacity))(element, screen, 1);
+			if (diagnose) {
+				Log("picker: screen %p element %s: %p, opacity %.2f -> %s", screen, part, element, now, visible ? "restore" : "0");
+			}
+			if (!visible) {
+				if (saved == g_savedOpacity.end()) {
+					g_savedOpacity.push_back({element, screen, now > 0.01f ? now : 1.0f});
+				}
+				reinterpret_cast<SetOpacityFn>(addr::Rebase(addr::kSetElementOpacity))(element, screen, 0.0f);
+			}
+			else if (saved != g_savedOpacity.end()) {
+				reinterpret_cast<SetOpacityFn>(addr::Rebase(addr::kSetElementOpacity))(element, screen, saved->opacity);
+			}
+		}
+		if (candidates[1] == candidates[0]) {
+			break;
+		}
+	}
+	if (visible) {
+		g_savedOpacity.clear();
+	}
+	if (g_liveHidden == visible) {
+		Log("picker: LIVE entry %s", visible ? "restored" : "hidden");
+	}
+	g_liveHidden = !visible;
+}
 
 uint32_t TagKey(const char* tag)
 {
@@ -168,8 +247,9 @@ std::vector<Slot> ListPartnerSlots()
 		const std::wstring name = file.substr(0, file.size() - wcslen(L"_herosave.bin"));
 		char nameText[64];
 		WideCharToMultiByte(CP_ACP, 0, name.c_str(), -1, nameText, sizeof(nameText), nullptr, nullptr);
-		if (g_forPlayerTwo && !loaded.empty() && _stricmp(nameText, loaded.c_str()) == 0) {
-			Log("picker: %s is the loaded main save; not offered", nameText);
+		// Player 1's hero is the journey of the loaded main save: none of its saves are offered.
+		if (g_forPlayerTwo && !loaded.empty() && _stricmp(JourneyOf(nameText).c_str(), JourneyOf(loaded).c_str()) == 0) {
+			Log("picker: %s belongs to player 1's loaded hero (%s); not offered", nameText, loaded.c_str());
 			continue;
 		}
 		if (!g_forPlayerTwo && !IsLoadableMainSave(nameText)) {
@@ -241,8 +321,13 @@ void* MainHero()
 	return tracked ? *tracked : nullptr;
 }
 
+void SetLiveEntryVisible(bool visible);
+
 void Finish(PickerState result)
 {
+	if (g_liveHidden) {
+		g_restoreLiveAt = GetTickCount() + 1500;  // after the closing animation
+	}
 	g_active = false;
 	g_texts.clear();
 	g_result = result;
@@ -273,6 +358,9 @@ void* __fastcall TextLookupDetour(void* db, void* edx, void* out, const uint32_t
 	return result;
 }
 
+void BuildPage();
+void ApplyPageInPlace();
+
 // Main page selection of the Options menu: pick a hero instead of running the entry's action.
 void __fastcall SelectDetour(void* box, void* edx, int player)
 {
@@ -289,10 +377,8 @@ void __fastcall SelectDetour(void* box, void* edx, int player)
 	}
 	if (g_entryNames[entry - 1] == "more") {
 		++g_page;
-		g_reopen = true;
-		g_reopenUntil = GetTickCount() + 1500;
-		g_active = false;  // closing for the next page is not a cancel
-		reinterpret_cast<CloseFn>((*reinterpret_cast<void***>(box))[addr::kBoxCloseSlot])(box);
+		BuildPage();
+		ApplyPageInPlace();
 		return;
 	}
 	g_picked = g_entryNames[entry - 1];
@@ -306,6 +392,34 @@ void __fastcall SelectDetour(void* box, void* edx, int player)
 	}
 	Finish(PickerState::Chosen);
 	reinterpret_cast<CloseFn>((*reinterpret_cast<void***>(box))[addr::kBoxCloseSlot])(box);
+}
+
+using SetEntryFn = void(__fastcall*)(void* box, void* edx, int entry);  // __thiscall, RET 4
+
+bool EntryUsable(int entry)
+{
+	return entry >= 1 && entry <= static_cast<int>(g_entryNames.size()) && !g_entryNames[entry - 1].empty();
+}
+
+// Moving the highlight on the main page (down, up, mouse hover): while the picker owns the menu,
+// skip entries with nothing on them (the hidden LIVE logo, blanks, entries the game hides).
+void __fastcall SetEntryDetour(void* box, void* edx, int entry)
+{
+	auto setEntry = reinterpret_cast<SetEntryFn>(addr::Rebase(addr::kOptionsSetEntry));
+	const int page = *reinterpret_cast<int*>(static_cast<uint8_t*>(box) + addr::kOptionsPage);
+	if (!g_active || (page != addr::kOptionsMainPage && page != addr::kOptionsMainPageAlt) || EntryUsable(entry)) {
+		setEntry(box, edx, entry);
+		return;
+	}
+	const int current = *reinterpret_cast<int*>(static_cast<uint8_t*>(box) + addr::kOptionsEntry);
+	const int step = entry > current ? 1 : entry < current ? -1 : 0;
+	for (int next = entry + step; step != 0 && next >= 1 && next <= static_cast<int>(g_entryNames.size()); next += step) {
+		if (EntryUsable(next)) {
+			setEntry(box, edx, next);
+			return;
+		}
+	}
+	// Nothing usable that way (or a mouse hover on a blank): stay put.
 }
 
 void __fastcall CloseDetour(void* box)
@@ -366,6 +480,31 @@ bool HookSelect()
 	return true;
 }
 
+bool HookSetEntry()
+{
+	bool ok = true;
+	for (uintptr_t va : addr::kOptionsSetEntryCalls) {
+		auto* site = reinterpret_cast<uint8_t*>(addr::Rebase(va));
+		int32_t rel;
+		memcpy(&rel, site + 1, sizeof(rel));
+		if (site[0] != 0xe8 || reinterpret_cast<uintptr_t>(site) + 5 + rel != addr::Rebase(addr::kOptionsSetEntry)) {
+			Log("picker: unexpected call at the Options entry setter");
+			ok = false;
+			continue;
+		}
+		rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&SetEntryDetour) - (reinterpret_cast<uintptr_t>(site) + 5));
+		DWORD oldProtect;
+		if (!VirtualProtect(site + 1, sizeof(rel), PAGE_EXECUTE_READWRITE, &oldProtect)) {
+			ok = false;
+			continue;
+		}
+		memcpy(site + 1, &rel, sizeof(rel));
+		VirtualProtect(site + 1, sizeof(rel), oldProtect, &oldProtect);
+		FlushInstructionCache(GetCurrentProcess(), site, 5);
+	}
+	return ok;
+}
+
 bool HookClose()
 {
 	auto* slot = reinterpret_cast<uintptr_t*>(addr::Rebase(addr::kOptionsMenuVtable)) + addr::kBoxCloseSlot;
@@ -383,27 +522,16 @@ bool HookClose()
 
 bool InstallPicker()
 {
-	const bool ok = HookTextLookup() && HookSelect() && HookClose();
+	const bool ok = HookTextLookup() && HookSelect() && HookClose() && HookSetEntry();
 	Log("picker: Options menu hooks %s", ok ? "installed" : "not installed");
 	return ok;
 }
 
 namespace {
 
-bool OpenPage()
+// Fills g_texts / g_entryNames for the current page.
+void BuildPage()
 {
-	void* hero = MainHero();
-	auto* root = *reinterpret_cast<uint8_t**>(addr::Rebase(addr::kGuiRoot));
-	auto* holder = root ? *reinterpret_cast<uint8_t**>(root + addr::kGuiRootMenuHolder) : nullptr;
-	void* boxList = holder ? *reinterpret_cast<void**>(holder + addr::kMenuHolderBoxList) : nullptr;
-	if ((!hero && g_forPlayerTwo) || !boxList || !g_lookupTrampoline) {
-		Log("picker: cannot open (hero %p, box list %p)", hero, boxList);
-		return false;
-	}
-	if (*reinterpret_cast<int*>(root + addr::kGuiRootMenuLock) > 0) {
-		Log("picker: the game is not accepting menus right now");
-		return false;
-	}
 	std::vector<Slot> slots = ListPartnerSlots();
 	g_texts.clear();
 	g_entryNames.assign(kEntryCount, "");
@@ -447,9 +575,109 @@ bool OpenPage()
 	for (int i = 0; i < kEntryCount; ++i) {
 		Log("picker: page %d entry %d: %s", g_page + 1, i + 1, g_entryNames[i].empty() ? "(unused)" : g_entryNames[i].c_str());
 	}
+}
+
+const std::wstring* TextFor(const char* tag)
+{
+	const uint32_t key = TagKey(tag);
+	for (const Replacement& replacement : g_texts) {
+		if (replacement.key == key) {
+			return &replacement.text;
+		}
+	}
+	return nullptr;
+}
+
+using SetTextFn = void(__cdecl*)(void* element, void* screen, void* const* text);
+
+// Rewrites the open menu's entry labels and descriptions for the current page, in both layouts
+// of the Options screen (title screen "Options", in game "Multiplayer"), so paging doesn't have
+// to reopen the menu.
+void ApplyPageInPlace()
+{
+	struct ElementText {
+		const char* path;
+		const char* tag;
+	};
+	static const ElementText kElements[] = {
+		{"Options.Sections.Options.SelectionTitle.SaveManagment", "TEXT_GUI_SAVE_MANAGEMENT"},
+		{"Options.Sections.Options.SelectionTitle.GameSettings", "TEXT_GUI_GAME_SETTINGS"},
+		{"Options.Sections.Options.SelectionTitle.NewGame", "TEXT_GUI_NEW_GAME"},
+		{"Options.Sections.Options.SelectionTitle.Live_Marketplace", "TEXT_GUI_LIVE_MARKETPLACE"},
+		{"Options.Sections.Options.SelectionTitle.Exit", "TEXT_GUI_EXIT_TO_WINDOWS"},
+		{"Options.Sections.Options.SelectionDesription.SaveDescription", "TEXT_GUI_SAVE_MANAGEMENT_DESC"},
+		{"Options.Sections.Options.SelectionDesription.SettingsDescription", "TEXT_GUI_GAME_SETTINGS_DESC"},
+		{"Options.Sections.Options.SelectionDesription.NewGameDescription", "TEXT_GUI_NEW_GAME_DESC"},
+		{"Options.Sections.Options.SelectionDesription.MarketplaceDescription", "TEXT_GUI_LIVE_MARKETPLACE_DESC"},
+		{"Options.Sections.Options.SelectionDesription.ExitDescription", "TEXT_GUI_EXIT_TO_WINDOWS_DESC"},
+		{"Options.Sections.Multiplayer.SelectionText.SaveManagement", "TEXT_GUI_SAVE_MANAGEMENT"},
+		{"Options.Sections.Multiplayer.SelectionText.GameSettings", "TEXT_GUI_GAME_SETTINGS"},
+		{"Options.Sections.Multiplayer.SelectionText.NewGame", "TEXT_GUI_NEW_GAME"},
+		{"Options.Sections.Multiplayer.SelectionText.Live_Marketplace", "TEXT_GUI_LIVE_MARKETPLACE"},
+		{"Options.Sections.Multiplayer.SelectionText.Exit", "TEXT_GUI_EXIT_TO_WINDOWS"},
+		{"Options.Sections.Multiplayer.SelectionDesription.SaveAndContDescription", "TEXT_GUI_SAVE_MANAGEMENT_DESC"},
+		{"Options.Sections.Multiplayer.SelectionDesription.GameSettingsDescription", "TEXT_GUI_GAME_SETTINGS_DESC"},
+		{"Options.Sections.Multiplayer.SelectionDesription.NewGameDescription", "TEXT_GUI_NEW_GAME_DESC"},
+		{"Options.Sections.Multiplayer.SelectionDesription.MarketplaceDescription", "TEXT_GUI_LIVE_MARKETPLACE_DESC"},
+		{"Options.Sections.Multiplayer.SelectionDesription.ExitDescription", "TEXT_GUI_EXIT_TO_WINDOWS_DESC"},
+	};
+	auto* root = *reinterpret_cast<uint8_t**>(addr::Rebase(addr::kGuiRoot));
+	auto* screens = root ? *reinterpret_cast<uint8_t**>(root + addr::kGuiRootScreens) : nullptr;
+	if (!screens) {
+		return;
+	}
+	void* const candidates[] = {*reinterpret_cast<void**>(screens + addr::kScreensFirst + 4 * addr::kOptionsScreenId),
+		*reinterpret_cast<void**>(screens + addr::kScreensShared)};
+	int set = 0;
+	for (void* screen : candidates) {
+		if (!screen) {
+			continue;
+		}
+		for (const ElementText& item : kElements) {
+			const std::wstring* text = TextFor(item.tag);
+			if (!text) {
+				continue;
+			}
+			void* path = nullptr;  // taken by value and destroyed by the lookup
+			reinterpret_cast<StringFromTextFn>(addr::Rebase(addr::kStringFromText))(&path, nullptr, item.path, -1);
+			void* element = reinterpret_cast<FindElementFn>(addr::Rebase(addr::kFindElement))(path, nullptr, screen);
+			if (!element) {
+				continue;
+			}
+			void* wide = nullptr;
+			reinterpret_cast<WideAssignFn>(addr::Rebase(addr::kWideStringAssign))(&wide, nullptr, text->c_str(), -1);
+			reinterpret_cast<SetTextFn>(addr::Rebase(addr::kSetElementText))(element, screen, &wide);
+			reinterpret_cast<StringDestroyFn>(addr::Rebase(addr::kWideStringDestroy))(&wide);
+			++set;
+		}
+		if (candidates[1] == candidates[0]) {
+			break;
+		}
+	}
+	Log("picker: page %d applied in place (%d texts)", g_page + 1, set);
+}
+
+bool OpenPage()
+{
+	void* hero = MainHero();
+	auto* root = *reinterpret_cast<uint8_t**>(addr::Rebase(addr::kGuiRoot));
+	auto* holder = root ? *reinterpret_cast<uint8_t**>(root + addr::kGuiRootMenuHolder) : nullptr;
+	void* boxList = holder ? *reinterpret_cast<void**>(holder + addr::kMenuHolderBoxList) : nullptr;
+	if ((!hero && g_forPlayerTwo) || !boxList || !g_lookupTrampoline) {
+		Log("picker: cannot open (hero %p, box list %p)", hero, boxList);
+		return false;
+	}
+	if (*reinterpret_cast<int*>(root + addr::kGuiRootMenuLock) > 0) {
+		Log("picker: the game is not accepting menus right now");
+		return false;
+	}
+	BuildPage();
 	g_result = PickerState::Open;
 	g_active = true;
 	g_menuSeen = false;
+	g_liveHidden = false;
+	g_restoreLiveAt = 0;
+	g_hidePasses = 0;
 	g_requestedAt = GetTickCount();
 	reinterpret_cast<OpenOptionsFn>(addr::Rebase(addr::kOpenOptionsMenu))(boxList, nullptr, hero, 0);
 	SetPickerPadSwap(g_forPlayerTwo);
@@ -482,6 +710,14 @@ bool PickerIsForPlayerTwo()
 
 PickerState PollPartnerPicker()
 {
+	// Re-apply every frame while open: the menu's animations restore the logo's opacity.
+	if (g_active && g_menuSeen) {
+		SetLiveEntryVisible(false);
+	}
+	if (!g_active && g_liveHidden && g_restoreLiveAt && static_cast<int>(GetTickCount() - g_restoreLiveAt) >= 0) {
+		g_restoreLiveAt = 0;
+		SetLiveEntryVisible(true);  // the normal Options menu keeps its LIVE entry
+	}
 	if (g_reopen) {
 		// The game may refuse menus for a moment while the last one closes.
 		if (OpenPage()) {

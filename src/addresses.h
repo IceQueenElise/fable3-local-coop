@@ -104,7 +104,20 @@ constexpr size_t kDisplayBoxesCurrent = 0x20;   // list: current box
 constexpr uintptr_t kDisplayBoxBusy = 0x00bbd3f0;
 constexpr size_t kGuiRootScreens = 0x34;        // GUI screen table: screen n at +8 + 4n (FUN_00d2f660)
 constexpr size_t kScreensFirst = 0x08;
-constexpr int kMenuBoxScreenId = 5;  // MenuBox.bgf: not shipped on PC, so the menu box never shows
+constexpr size_t kScreensShared = 0xa0;         // shared slot (screen id at +0x9C), FUN_00d30040
+constexpr int kMenuBoxScreenId = 5;
+constexpr int kOptionsScreenId = 0x11;       // Options.bgf
+// Show/hide a screen element by dotted path from "Layer" (segments hashed h*0x1003F + c by
+// FUN_00407be0): void __cdecl(const string* path, screen, char visible).
+constexpr uintptr_t kSetElementVisible = 0x01015c30;
+constexpr uintptr_t kFindElement = 0x01015300;      // element* __cdecl(string path (by value, destroyed), parent or 0, screen)
+constexpr uintptr_t kIsElementVisible = 0x01014630; // char __cdecl(element, screen)
+constexpr uintptr_t kSetElementText = 0x010142d0;
+// Element opacity on a screen's presentation (negative = hidden): read FUN_01014440
+// float __cdecl(element, screen, char raw); write FUN_010143b0 void __cdecl(element, screen, float).
+constexpr uintptr_t kGetElementOpacity = 0x01014440;
+constexpr uintptr_t kSetElementOpacity = 0x010143b0;   // void __cdecl(element, screen, const wstring* text)
+constexpr uintptr_t kWideStringDestroy = 0x019ffa70; // void __thiscall(wstring*)  // MenuBox.bgf: not shipped on PC, so the menu box never shows
 // GUI screen loader FUN_00d30040: void __thiscall(screens, int id); ids map to .bgf files
 // (0 MessageBoxMulti, 4 DisplayBox, 5 MenuBox, 7 QueryBox, 0x10 BedMenuBox, 0x11 Options, ...).
 constexpr uintptr_t kScreenLoad = 0x00d30040;
@@ -126,6 +139,10 @@ constexpr uintptr_t kOpenOptionsMenu = 0x00bbd860;
 constexpr size_t kGuiRootMenuLock = 0x120;  // int; the opener does nothing while > 0
 constexpr uintptr_t kOptionsSelect = 0x00beefe0;
 constexpr uintptr_t kOptionsSelectCall = 0x00bf0d8b;
+// Main page highlight setter FUN_00be8830 void __thiscall(box, int entry), called by down
+// (FUN_00be9580), up (FUN_00be9760) and mouse hover (FUN_00bea280).
+constexpr uintptr_t kOptionsSetEntry = 0x00be8830;
+constexpr uintptr_t kOptionsSetEntryCalls[] = {0x00be9736, 0x00be98ec, 0x00bea2d2};
 constexpr uintptr_t kOptionsMenuVtable = 0x01b1e494;
 constexpr size_t kBoxCloseSlot = 2;
 constexpr size_t kOptionsPage = 0xc8;
